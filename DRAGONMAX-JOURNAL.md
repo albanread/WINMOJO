@@ -85,3 +85,73 @@ correct result. No Mojo needed, so this runs in parallel with WINMOJO's G3–G6.
 
 The strategy gate is D3, deliberately placed *after* D2's measurements rather
 than guessed at now. Three candidates written up in `DRAGONMAX.md`.
+
+---
+
+## 2026-08-19 — D1a: all three surfaces answer
+
+`dragon/probe/probe_surfaces.py` — ctypes, no build system, no Mojo. Runs in a
+native ARM64 Python 3.12 and asks each vendor runtime what it is.
+
+```
+  [ok] Adreno OpenCL
+  [ok] Hexagon QNN system
+  [ok] Hexagon QNN HTP
+```
+
+### Correction: the ICD trap I predicted does not exist
+
+D0 recorded that no OpenCL ICD was registered under
+`HKLM\SOFTWARE\Khronos\OpenCL\Vendors`, and inferred the generic loader would
+find nothing. **Wrong.** `C:\Windows\System32\OpenCL.dll` enumerates two
+platforms perfectly well. Registration lives somewhere other than the key I
+checked. `HARDWARE.md` has been corrected.
+
+Going the other way, `OpenCL_adreno.dll` exports *neither* `clGetPlatformIDs`
+nor `clIcdGetPlatformIDsKHR`, so it is not usable as a direct loader — the
+exact opposite of the D0 guess. Use the system loader.
+
+### The real trap, which fails silently
+
+**Two OpenCL platforms report the same device name.**
+
+| Platform | Device reported | CUs |
+|---|---|---|
+| `QUALCOMM Snapdragon(TM)` — OpenCL 3.0, build 807.0 | Adreno X1-45 | 3 |
+| `OpenCLOn12` — D3D12 translation | Adreno X1-45 | 1 |
+| `OpenCLOn12` | Microsoft Basic Render Driver | 1 |
+
+Anything that picks a device by matching "Adreno" in the name can land on
+Microsoft's D3D12 translation layer and still look like it succeeded. **Select
+by platform, not device name.** The probe now labels both inline so this can't
+be misread later.
+
+Also: the QUALCOMM driver reports `CL_DEVICE_MAX_CLOCK_FREQUENCY` as **1 MHz**.
+Garbage. Do not use that field. Global memory reads 15 GiB — about half the
+unified 31.6 GiB — and local memory 32 KiB, agreeing with the Vulkan numbers.
+
+### NPU versions, measured
+
+| Library | Provider | backendId | API |
+|---|---|---|---|
+| `QnnHtp.dll` | `HTP_QTI_AISW` | 6 | core 2.34.0, backend 5.45.0 |
+| `QnnSystem.dll` | `SYSTEM_QTI_AISW` | 0 | system 1.9.0 |
+
+So the bundled QAIRT is the 2.34 generation. Worth pinning: context binaries are
+version-sensitive.
+
+One self-inflicted bug worth recording, because it is the kind that produces
+confident nonsense rather than an error. `QnnSystemInterface_t` carries a
+*single* `systemApiVersion`, while `QnnInterface_t` carries a `coreApiVersion` +
+`backendApiVersion` pair. Reading the system struct with the backend layout
+printed `backend=0.860793856.32764` — plausible-looking garbage, no crash, no
+error code. Two structs now, and a comment saying why.
+
+That is the [[dolphin-32bit-offsets-rule]] lesson again in a new costume:
+a struct layout taken from the wrong header does not fail, it lies.
+
+### Next
+
+D1b — reachability is not execution. Get a checkable numerical result out of
+each surface: a real OpenCL kernel on the QUALCOMM platform, a Vulkan compute
+dispatch, and a trivial QNN graph on HTP V81.

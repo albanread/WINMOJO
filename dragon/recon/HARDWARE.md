@@ -44,10 +44,26 @@ Both live in the driver store package above; no SDK install needed.
 - **OpenCL** — `OpenCL_adreno.dll`, `qcclarm64xcompiler.dll`
 - **Vulkan compute** — `qcvkarm64xum.dll`, ICD `qcvk_icd_arm64x.json`
 
-Note: no OpenCL vendor ICD is registered under
-`HKLM\SOFTWARE\Khronos\OpenCL\Vendors`, so a generic `OpenCL.dll` loader will
-find nothing. The Adreno OpenCL runtime has to be loaded directly from the
-driver-store path. Worth confirming before assuming OpenCL is a viable spine.
+**OpenCL works through the standard ICD loader** (D1 probe, 2026-08-19). An
+earlier guess that no ICD was registered — based on an empty
+`HKLM\SOFTWARE\Khronos\OpenCL\Vendors` — was wrong; registration happens
+elsewhere and `C:\Windows\System32\OpenCL.dll` enumerates fine.
+
+The real trap is different and worse, because it fails silently:
+
+> **Two OpenCL platforms both claim the Adreno X1-45.**
+> `QUALCOMM Snapdragon(TM)` (OpenCL 3.0, QUALCOMM build 807.0) is the native
+> driver. `OpenCLOn12` is Microsoft's D3D12 translation layer and reports the
+> *same device name*. Pick by **platform**, never by device name.
+
+Measured from the native QUALCOMM platform: 3 compute units, 32 KiB local
+memory, 15 GiB global (half the unified 31.6 GiB is exposed to the GPU). The
+driver reports `MAX_CLOCK_FREQUENCY` as 1 MHz, which is nonsense — do not use
+that field for anything.
+
+`OpenCL_adreno.dll` itself exports neither `clGetPlatformIDs` nor
+`clIcdGetPlatformIDsKHR`, so it is not usable as a direct loader. Go through
+the system loader.
 
 ## NPU — Hexagon HTP (V81)
 
@@ -60,6 +76,11 @@ CLI at `C:\Program Files (x86)\GenieX CLI\qairt\htp-files`:
 
 **V81 is this chip's Hexagon version.** V73/V75/V79 stubs are also present for
 other Snapdragon parts — ignore them.
+
+Measured by the D1 probe: `QnnHtp.dll` publishes provider **`HTP_QTI_AISW`**,
+backendId 6, core API **2.34.0**, backend API **5.45.0**. `QnnSystem.dll`
+publishes `SYSTEM_QTI_AISW`, system API 1.9.0. Both load and answer in a native
+ARM64 process.
 
 Driver: Qualcomm HND 30.0.220.3000. This does **not** come from Windows Update;
 see the `geniex-gemma4-npu-setup` memory for why that matters.

@@ -77,7 +77,7 @@ before it.
 | Gate | Deliverable | Status |
 |---|---|---|
 | **D0** | Recon: hardware measured, MAX anatomy mapped, licensing recorded | **done** |
-| **D1** | Probe harness — drive all three surfaces from native Win ARM64 | next |
+| **D1** | Probe harness — drive all three surfaces from native Win ARM64 | **D1a done**, D1b next |
 | **D2** | Baseline: one reference workload timed on NPU / GPU / CPU | |
 | **D3** | **Strategy gate** — pick the spine on D2's evidence | |
 | D4+ | *(defined by D3)* | |
@@ -88,15 +88,19 @@ before it.
 Three standalone probes under `dragon/probe/`, each proving we can reach the
 silicon from a native ARM64 process:
 
-- `adreno_cl` — load Adreno OpenCL **directly from the driver store** (no ICD is
-  registered under `HKLM\SOFTWARE\Khronos\OpenCL\Vendors`, so the generic
-  loader finds nothing), enumerate, run a trivial kernel
-- `adreno_vk` — Vulkan compute dispatch via the Qualcomm ICD
-- `htp_qnn` — load `QnnHtp.dll` + `QnnSystem.dll` from the QAIRT bundle, build a
-  context, execute a trivial graph on HTP V81
+**D1a — reachability (done).** `dragon/probe/probe_surfaces.py` loads each
+vendor runtime from a native ARM64 process and reports what it is. All three
+answer. Findings in the journal; the important one is that **two OpenCL
+platforms claim the same Adreno device**, so selection must be by platform.
 
-Exit criterion: each prints real device properties and a correct numerical
-result. Cheap, and it kills the biggest unknowns early.
+**D1b — execution (next).** Reachability is not the same as running work.
+Still to prove: a correct numerical result out of each surface.
+
+- `adreno_cl` — build and run a real kernel on the QUALCOMM platform
+- `adreno_vk` — Vulkan compute dispatch via the Qualcomm ICD
+- `htp_qnn` — create a context and execute a trivial graph on HTP V81
+
+Exit criterion: each returns numbers we can check.
 
 ### D3 — the strategy gate
 
