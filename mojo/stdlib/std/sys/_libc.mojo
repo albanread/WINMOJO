@@ -326,7 +326,13 @@ def fcntl[*types: Intable](fd: c_int, cmd: c_int, *args: *types) -> c_int:
 
 @always_inline
 def dlerror(out result: OptionalPointer[c_char, MutUntrackedOrigin]):
-    result = external_call["dlerror", type_of(result)]()
+    comptime if CompilationTarget.is_windows():
+        # Win32 reports failures as a numeric code through GetLastError
+        # rather than as a string, and there is no per-thread message buffer
+        # to hand back. Callers treat a null result as "no detail available".
+        result = OptionalPointer[c_char, MutUntrackedOrigin]()
+    else:
+        result = external_call["dlerror", type_of(result)]()
 
 
 @always_inline
@@ -334,14 +340,32 @@ def dlopen(
     filename: OptionalPointer[mut=False, c_char, ImmUntrackedOrigin],
     flags: c_int,
 ) -> OptionalPointer[NoneType, MutUntrackedOrigin]:
-    return external_call[
-        "dlopen", OptionalPointer[NoneType, MutUntrackedOrigin]
-    ](filename, flags)
+    comptime if CompilationTarget.is_windows():
+        # LoadLibraryA ignores the POSIX flags: RTLD_LAZY/RTLD_NOW have no
+        # analogue because a PE import table is always resolved at load.
+        # A null filename means "the main program" for dlopen; the Win32
+        # spelling of that is GetModuleHandleA(nullptr).
+        if not filename:
+            return external_call[
+                "GetModuleHandleA", OptionalPointer[NoneType, MutUntrackedOrigin]
+            ](filename)
+        return external_call[
+            "LoadLibraryA", OptionalPointer[NoneType, MutUntrackedOrigin]
+        ](filename.value())
+    else:
+        return external_call[
+            "dlopen", OptionalPointer[NoneType, MutUntrackedOrigin]
+        ](filename, flags)
 
 
 @always_inline
 def dlclose(handle: OptionalPointer[mut=True, NoneType, _]) -> c_int:
-    return external_call["dlclose", c_int](handle)
+    comptime if CompilationTarget.is_windows():
+        # FreeLibrary returns nonzero on success, the opposite of dlclose,
+        # whose callers expect 0 to mean success.
+        return 0 if external_call["FreeLibrary", c_int](handle) != 0 else -1
+    else:
+        return external_call["dlclose", c_int](handle)
 
 
 @always_inline
@@ -353,7 +377,10 @@ def dlsym[
     name: ImmPointer[c_char, _],
     out result: OptionalPointer[result_type, MutUntrackedOrigin],
 ):
-    result = external_call["dlsym", type_of(result)](handle, name)
+    comptime if CompilationTarget.is_windows():
+        result = external_call["GetProcAddress", type_of(result)](handle, name)
+    else:
+        result = external_call["dlsym", type_of(result)](handle, name)
 
 
 def realpath(

@@ -33,6 +33,10 @@ def _load_libc() raises -> OwnedDLHandle:
         return OwnedDLHandle("libc.so")  # musl / BSD
     elif CompilationTarget.is_macos():
         return OwnedDLHandle("/usr/lib/system/libsystem_c.dylib")
+    elif CompilationTarget.is_windows():
+        # ucrtbase.dll is where the UCRT's C functions actually live;
+        # msvcrt.dll is a legacy forwarding stub kept for old binaries.
+        return OwnedDLHandle("ucrtbase.dll")
     else:
         comptime assert False, "libc discovery not implemented for platform"
 
