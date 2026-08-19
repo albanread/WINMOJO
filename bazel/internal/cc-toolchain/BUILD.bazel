@@ -96,8 +96,16 @@ cc_sysroot(
             "//:modular_config_ubsan": ["//bazel/internal/cc-toolchain/features:ubsan"],
             "//conditions:default": [],
         }) + select({
+            # Both limits bite on Windows and neither exists elsewhere.
+            # compiler_param_file keeps compile actions under cmd.exe's 8191
+            # character ceiling, and linker_param_file keeps links under the
+            # 32767 that CreateProcess itself imposes: llvm-tblgen links with
+            # over 400 arguments of long output paths and failed with a bare
+            # exit -1, no diagnostic, which is what exceeding that limit looks
+            # like.
             "@platforms//os:windows": [
                 "//bazel/internal/cc-toolchain/features:compiler_param_file",
+                "@rules_cc//cc/toolchains/features/legacy:linker_param_file",
             ],
             "//conditions:default": [],
         }) + [
