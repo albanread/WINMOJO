@@ -35,12 +35,17 @@ cc_args(
         "//:linux_aarch64": ["--target=aarch64-unknown-linux-gnu"],
         # TODO: Pull 11.0 from config set in .bazelrc
         "@platforms//os:macos": ["--target=arm64-apple-macosx11.0"],
+        # Use the clang driver rather than clang-cl so the GNU-style flags
+        # throughout this file keep working against the MSVC ABI.
+        "//:windows_arm64": ["--target=aarch64-pc-windows-msvc"],
     }) + select({
         "@platforms//os:linux": [
             # Compress debug info to improve binary size, not supported on macOS
             "-gz",
         ],
         "@platforms//os:macos": [],
+        # Windows debug info is PDB-based, so -gz does not apply.
+        "@platforms//os:windows": [],
     }),
     env = {
         "ZERO_AR_DATE": "1",  # Required for hermetic links on macOS (default dependent)
@@ -114,11 +119,9 @@ cc_args(
     args = [
         "-fcolor-diagnostics",
         "-ffile-compilation-dir=.",  # Avoid absolute paths in binaries
-        "-fno-autolink",
         "-fno-exceptions",
         "-fno-omit-frame-pointer",
         "-fno-rtti",
-        "-fPIC",
         "-fstack-protector",
         "-funwind-tables",
         "-fvisibility-inlines-hidden",
@@ -138,12 +141,28 @@ cc_args(
             "-ffunction-sections",
         ],
         "@platforms//os:macos": [],
+        "@platforms//os:windows": [],
     }) + select({
         # Match the Mojo toolchain's target-cpu so AVX-512 doesn't leak
         # into auto-vectorized C++ stdlib code on AVX-512-capable hosts.
         "//:linux_x86_64": ["-march=x86-64-v3"],
         "//:linux_aarch64": ["-mcpu=neoverse-n1"],
         "@platforms//os:macos": [],
+        "@platforms//os:windows": [],
+    }) + select({
+        # PE/COFF is position independent by definition, so -fPIC is not just
+        # redundant but rejected as an unused argument, which
+        # -Werror=unused-command-line-argument then turns into a hard error.
+        "@platforms//os:windows": [],
+        "//conditions:default": ["-fPIC"],
+    }) + select({
+        # On Windows the MSVC headers select the matching CRT import library
+        # through #pragma comment(lib, ...), which is exactly what -fno-autolink
+        # suppresses. Leaving it off lets the debug/release and static/dynamic
+        # CRT variants stay consistent with the compilation mode instead of
+        # being pinned by hand.
+        "@platforms//os:windows": [],
+        "//conditions:default": ["-fno-autolink"],
     }),
 )
 
@@ -158,6 +177,10 @@ cc_args(
     ] + select({
         "@platforms//os:linux": ["-stdlib=libstdc++"],
         "@platforms//os:macos": ["-stdlib=libc++"],
+        # The MSVC STL is the only C++ standard library available for a
+        # windows-msvc target, and it is found through -imsvc rather than
+        # selected with -stdlib.
+        "@platforms//os:windows": [],
     }),
 )
 
@@ -195,6 +218,9 @@ cc_args(
             "-Wl,-no_warn_duplicate_libraries",
             "-Wl,-oso_prefix,.",  # Strip absolute paths from debug info file references
         ],
+        # lld-link takes none of the ELF or Mach-O options above, and the CRT
+        # import libraries arrive via the autolink pragmas in the MSVC headers.
+        "@platforms//os:windows": [],
     }) + select({
         # Sanitizers are split across multiple libraries, some of which aren't linked to shared libraries
         "//:asan_linux": ["-Wl,-z,undefs"],
@@ -212,15 +238,20 @@ cc_args(
 cc_args(
     name = "link_executable_args",
     actions = ["@rules_cc//cc/toolchains/actions:link_executable_actions"],
-    args = [
-        "-Wl,-pie",
-    ] + select({
+    args = select({
+        # PE images are relocatable through ASLR, and there is no rpath: the
+        # loader resolves DLLs by search path, so neither flag has a meaning
+        # lld-link would accept.
+        "@platforms//os:windows": [],
+        "//conditions:default": ["-Wl,-pie"],
+    }) + select({
         "@platforms//os:macos": [
             "-Wl,-rpath,@loader_path/../lib",
         ],
         "@platforms//os:linux": [
             "-Wl,-rpath,$ORIGIN/../lib",
         ],
+        "@platforms//os:windows": [],
     }),
 )
 
@@ -236,6 +267,7 @@ cc_args(
             "-Wl,-rpath,$ORIGIN",
             "-Wl,-rpath,$ORIGIN/../lib",
         ],
+        "@platforms//os:windows": [],
     }),
 )
 

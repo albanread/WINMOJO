@@ -1,6 +1,5 @@
 load("@rules_cc//cc:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_cc//cc/toolchains:args.bzl", "cc_args")
 load("@rules_cc//cc/toolchains:artifacts.bzl", "cc_artifact_name_pattern")
 load("@rules_cc//cc/toolchains:make_variable.bzl", "cc_make_variable")
 load("@rules_cc//cc/toolchains:toolchain.bzl", "cc_toolchain")
@@ -51,7 +50,6 @@ cc_sysroot(
             "//:linux_x86_64": [":linux_sysroot_x86_64"],
             "//:linux_aarch64": [":linux_sysroot_aarch64"],
             "//:windows_arm64": [
-                ":windows_arm64_target",
                 "@sysroot-windows-arm64//:includes",
                 "@sysroot-windows-arm64//:libs",
             ],
@@ -167,18 +165,6 @@ cc_make_variable(
     name = "macos_stack_frame",
     value = "-Wframe-larger-than=100000000 -Wno-vla",
     variable_name = "STACK_FRAME_UNLIMITED",
-)
-
-# The hermetic clang is a *-pc-windows-msvc build, but the driver still has to be
-# told which target to emit for. Using the clang driver rather than clang-cl
-# keeps the GNU-style flags in args/ and features/ working unchanged.
-cc_args(
-    name = "windows_arm64_target",
-    actions = [
-        "@rules_cc//cc/toolchains/actions:compile_actions",
-        "@rules_cc//cc/toolchains/actions:link_actions",
-    ],
-    args = ["--target=aarch64-pc-windows-msvc"],
 )
 
 cc_artifact_name_pattern(

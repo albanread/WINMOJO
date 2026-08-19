@@ -10,19 +10,19 @@ set "SCRIPT_ROOT=%~dp0"
 set "REPO_ROOT=%SCRIPT_ROOT%.."
 set "BAZELRC_ROOT=%REPO_ROOT%\build"
 
+REM Match against the whole command line rather than iterating tokens: cmd's
+REM `for` treats "=" as a delimiter, which splits --config=build-mojo in two.
 set "IS_BUILD_TEST_OR_RUN=false"
 set "HAS_MOJO_CONFIG=false"
-for %%a in (%*) do (
-  set "ARG=%%~a"
-  if "!ARG:~0,2!"=="--" (
-    if "!ARG!"=="--config=build-mojo" set "HAS_MOJO_CONFIG=true"
-    if "!ARG!"=="--config=prebuilt-mojo" set "HAS_MOJO_CONFIG=true"
-  ) else (
-    if "!ARG!"=="build" set "IS_BUILD_TEST_OR_RUN=true"
-    if "!ARG!"=="test" set "IS_BUILD_TEST_OR_RUN=true"
-    if "!ARG!"=="run" set "IS_BUILD_TEST_OR_RUN=true"
-  )
-)
+
+if "%~1"=="build" set "IS_BUILD_TEST_OR_RUN=true"
+if "%~1"=="test" set "IS_BUILD_TEST_OR_RUN=true"
+if "%~1"=="run" set "IS_BUILD_TEST_OR_RUN=true"
+
+echo %*| findstr /C:"--config=build-mojo" >nul 2>&1
+if not errorlevel 1 set "HAS_MOJO_CONFIG=true"
+echo %*| findstr /C:"--config=prebuilt-mojo" >nul 2>&1
+if not errorlevel 1 set "HAS_MOJO_CONFIG=true"
 
 if exist "%REPO_ROOT%\local.bazelrc" (
   findstr /R /C:"config=prebuilt-mojo" /C:"config=build-mojo" "%REPO_ROOT%\local.bazelrc" >nul 2>&1
