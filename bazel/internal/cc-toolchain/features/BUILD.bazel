@@ -11,6 +11,18 @@ package(default_visibility = ["//visibility:public"])
     for name in MARKER_FEATURES
 ]
 
+# Bazel's own feature: when enabled, compile arguments are written to a params
+# file and the command line becomes "@file". Needed on Windows, where cmd.exe
+# truncates a command line at 8191 characters. Compile actions go through a .bat
+# wrapper so parse_headers gets its PARSE_HEADER marker, and protobuf's Java
+# generator compiles with nearly 190 arguments of long Bazel output paths, which
+# overruns that limit. Link actions solve the same problem by binding clang++
+# directly instead.
+cc_feature(
+    name = "compiler_param_file",
+    feature_name = "compiler_param_file",
+)
+
 cc_feature(
     name = "asan",
     args = [

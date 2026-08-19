@@ -95,6 +95,11 @@ cc_sysroot(
             "//:modular_config_tsan": ["//bazel/internal/cc-toolchain/features:tsan"],
             "//:modular_config_ubsan": ["//bazel/internal/cc-toolchain/features:ubsan"],
             "//conditions:default": [],
+        }) + select({
+            "@platforms//os:windows": [
+                "//bazel/internal/cc-toolchain/features:compiler_param_file",
+            ],
+            "//conditions:default": [],
         }) + [
             # Features where order doesn't matter
             "//bazel/internal/cc-toolchain/features:archive_param_file",
@@ -125,6 +130,7 @@ cc_sysroot(
             "//bazel/internal/cc-toolchain/features:layering_check",
             "//bazel/internal/cc-toolchain/features:use_module_maps",
             "//bazel/internal/cc-toolchain/features:parse_headers",
+            "//bazel/internal/cc-toolchain/features:compiler_param_file",
             "@rules_cc//cc/toolchains/args/generate_linkmap:feature",
             "@rules_cc//cc/toolchains/args/thin_lto:feature",
         ] + [
