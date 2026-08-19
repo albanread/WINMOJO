@@ -5,6 +5,11 @@ load("@llvm-raw//utils/bazel:configure.bzl", _llvm_configure = "llvm_configure")
 BACKENDS = [
     "AArch64",
     "RISCV",
+    # SPIR-V for Adreno offload (DragonMax): KGEN's SpirvBackend runs llc
+    # against this backend and hands the emitted module to the Qualcomm driver
+    # compiler at kernel-load time. "SPIRV" is a supported overlay target
+    # (llvm-raw utils/bazel/configure.bzl).
+    "SPIRV",
     "X86",
 ]
 

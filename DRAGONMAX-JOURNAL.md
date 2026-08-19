@@ -880,3 +880,86 @@ this into. The W3 journal entry's "next real obstacle" framing is retired.
 
 The recurring lesson, fourth instance: one grep is a hypothesis, not a finding.
 The difference this time is it got challenged before it shaped a plan.
+
+---
+
+## 2026-08-19 — the SPIR-V trio: KGEN taught to emit for Adreno
+
+W3's compiler half, written and wired. Three registries, three implementations,
+modeled line-for-line on the open Host trio:
+
+| File | Registry | Job |
+|---|---|---|
+| `KGEN/lib/Target/Spirv/SpirvTraits.{h,cpp}` | `TargetTraitsRegistry` | triple match (`isSPIRV()`), extensions (`.spvasm`/`.spv.ll`/`.spv`), accelerator table entry `adreno-x1` |
+| `KGEN/lib/KGENToLLVM/Target/Spirv/SpirvLowering.cpp` | `TargetLoweringRegistry` | kernel marking |
+| `KGEN/lib/Compiler/ObjectCompiler/Target/Spirv/SpirvBackend.{h,cpp}` | `TargetBackendRegistry` | llc → SPIR-V module emission |
+
+Plus one line: `"SPIRV"` in `BACKENDS` (`bazel/public-patches/llvm_project.bzl`),
+verified against the LLVM bazel overlay's own target list before adding —
+`configure.bzl:23` lists SPIRV and the overlay carries full build rules for it.
+
+**Zero KGEN/BUILD.bazel edits needed.** All three library rules glob
+`Target/**/*.cpp` and are `alwayslink = True`, so a source file dropped into
+the right directory compiles in and its static-initializer registration
+survives the linker. "Targets are dropped from a build by omitting their
+source" — the registration design in TargetTraits.h — works in both directions.
+
+### Design decisions worth defending later
+
+**Kernel entry points are marked with the `SPIR_KERNEL` calling convention.**
+The LLVM SPIR-V backend recognizes kernels by CConv and emits `OpEntryPoint`
+for them. Miss this and a kernel lowers as a plain function, the driver finds
+no entry point, and the failure surfaces as `clCreateKernel` failing at load
+time — nowhere near the actual mistake. `markExportedKernel` sets it,
+`isExportedKernel` reads it back.
+
+**`emitObject` returns the `.spv` directly and never calls `ctx.linkObject`.**
+HostBackend links each object into the host image; a SPIR-V module inside the
+host `.so` would load as garbage. The module *is* the deliverable — the
+DragonMax runtime's `loadFunction` sniffs the magic and hands it to
+`clCreateProgramWithIL`. The backend validates the magic on emission with an
+error that points at the BACKENDS list, so a misconfigured LLVM build fails at
+compile time with a named cause instead of at kernel-load time inside the
+driver.
+
+**`isBaseTarget() = true`, stated plainly in the header.** The MAX gate exists
+to require Modular's binary distribution for the backends Modular ships inside
+it. This trio is compiled from source in this repository; there is no package
+whose absence could invalidate it. The closed piece in our chain is Qualcomm's
+driver compiler consuming the SPIR-V at load time — a driver boundary, the same
+one every GPU vendor imposes, not a withheld runtime.
+
+**`SplitStrategy::None`.** The driver compiler consumes whole modules; there is
+no MCLinker step for `.spv`, so per-function splitting would only multiply
+driver compilations. Shared memory is addrspace(3) (Workgroup, same numbering
+as NVPTX/AMDGPU). Sanitizers are dropped device-side.
+
+### A gitignore trap that nearly ate the whole thing
+
+`git status` showed the five new files as... nothing. `.gitignore:69` has a
+bare `target/` — a Rust build-dir rule — and on this case-insensitive
+filesystem it swallows **every `Target/` source directory in KGEN**. The Host
+files are only visible because upstream tracked them before the rule could
+bite; any *new* file under a `Target/` dir silently vanishes from commits.
+Fixed with re-include rules at the bottom of `.gitignore` rather than
+`git add -f`, so the next person does not hit it.
+
+### Verification status, stated honestly
+
+None of this has compiled — it cannot until WINMOJO's G3 delivers a building
+KGEN on this machine. Written against the real interfaces (all three read in
+full) and the real LLVM overlay, but the first compile will adjudicate:
+
+- the `mlir::LLVM::cconv::CConv` spelling (the enum case is confirmed in
+  `LLVMEnums.td`; the generated namespace is from memory — the vendored LLVM
+  tree in bazel's output base vanished mid-read, ephemeral by design)
+- the exact `WriteableBuffer`/`BufferRef` idioms mirrored from HostBackend
+- whether the offload flow expects anything beyond `emitObject`'s buffer —
+  how the `.spv` travels from ObjectCompiler into the Mojo-side `loadFunction`
+  call is the next thing to trace once a compiler exists to trace it with
+
+The full path, end to end, now reads: Mojo source → KGEN (`--target-accelerator
+adreno-x1` → stdlib `AdrenoX1` target → SpirvLowering marks kernels →
+SpirvBackend emits `.spv`) → `dragonrt.dll` (`loadFunction` →
+`clCreateProgramWithIL`) → Qualcomm driver → Adreno silicon. Every arrow except
+the last is open source in this repository.
