@@ -253,15 +253,36 @@ cc_args(
         # "machine type arm64 conflicts with x64" against objects that were all
         # correctly ARM64, including the CRT's own.
         #
-        # -fms-runtime-lib must be repeated here: the clang driver makes its
-        # own CRT choice when it constructs the lld-link line, defaulting to
-        # -defaultlib:libcmt. Stating it only for compiles produces a mixed
-        # link — objects demanding __imp_ CRT symbols against a static libucrt
-        # — where every small function nothing referenced statically (strtoull,
-        # isxdigit, _fpclass) becomes an undefined import.
+        # The dynamic CRT has to be assembled by hand here, because two
+        # mechanisms that should each deliver it both fail:
+        #
+        #  1. clang 22's MSVC linker job never consults -fms-runtime-lib (that
+        #     flag only shapes compiles) and hardcodes -defaultlib:libcmt,
+        #     injecting the static CRT into every link. /NODEFAULTLIB vetoes
+        #     that by name. The flag is still stated for the day the driver
+        #     learns to read it.
+        #
+        #  2. The DEFAULTLIB directives that -fms-runtime-lib=dll embeds in
+        #     every object were demonstrably not honored for objects packed
+        #     into .lib archives: msvcprt symbols (std::time_get) came up
+        #     undefined even though the referencing object carried
+        #     DEFAULTLIB:msvcprt.lib in its .drectve. So the full set is
+        #     stated explicitly: msvcrt (startup + vcruntime140 imports),
+        #     msvcprt (msvcp140, the C++ standard library), ucrt (ucrtbase,
+        #     the C runtime and THE process heap), vcruntime.
+        #
+        # Mixing in any static-CRT member instead surfaces as undefined
+        # __imp_ symbols for whatever small functions nothing pulled
+        # statically (strtoull, isxdigit, _fpclass), or as duplicate symbols
+        # against ucrt.lib, depending on which side wins the race.
         "@platforms//os:windows": [
             "-Wl,/MACHINE:ARM64",
             "-fms-runtime-lib=dll",
+            "-Wl,/NODEFAULTLIB:libcmt.lib",
+            "-Wl,/DEFAULTLIB:msvcrt.lib",
+            "-Wl,/DEFAULTLIB:msvcprt.lib",
+            "-Wl,/DEFAULTLIB:ucrt.lib",
+            "-Wl,/DEFAULTLIB:vcruntime.lib",
         ],
     }) + select({
         # Sanitizers are split across multiple libraries, some of which aren't linked to shared libraries
