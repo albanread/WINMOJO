@@ -52,6 +52,9 @@ PATCHES = [
     # targeting the MSVC ABI matched neither it nor the MinGW setting, and the
     # link fell through to the Unix default of -lm, -lpthread and -ldl.
     "//bazel/public-patches:llvm-windows-msvc-abi-with-clang-driver.patch",
+    # is_windows_clang_mingw also matches a clang driver targeting the MSVC ABI,
+    # and being more specialized it won the select and applied MinGW link flags.
+    "//bazel/public-patches:llvm-mingw-setting-x86-only.patch",
 ]
 
 def _llvm_source_impl(module_ctx):
