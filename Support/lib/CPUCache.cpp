@@ -16,6 +16,9 @@
 #include "Support/ErrorOr.h"
 #include "Support/LLVMForwardDecls.h"
 #include "llvm/ADT/Twine.h"
+// divideCeil, used by the Windows implementation below. It came in
+// transitively on the other platforms, so this only shows up here.
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/Process.h"
 
 #include <cassert>

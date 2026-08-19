@@ -17,6 +17,9 @@
 
 #if defined(__APPLE__)
 #include <dispatch/dispatch.h>
+#elif defined(_WIN32)
+#include <climits>
+#include <windows.h>
 #else
 #include <cassert>
 #include <cerrno>
@@ -44,6 +47,8 @@ public:
 private:
 #if defined(__APPLE__)
   dispatch_semaphore_t sema;
+#elif defined(_WIN32)
+  HANDLE sema;
 #else
   sem_t sema;
 #endif
@@ -75,6 +80,51 @@ bool Semaphore::Impl::wait(int64_t timeoutNS) {
   dispatch_time_t timeout =
       dispatch_time(DISPATCH_TIME_NOW, /*nsecToAdd*/ timeoutNS);
   return 0 != dispatch_semaphore_wait(sema, timeout);
+}
+
+#elif defined(_WIN32)
+//===----------------------------------------------------------------------===//
+// Semaphore::Impl for Windows
+//===----------------------------------------------------------------------===//
+
+// NOTE: as with the POSIX implementation below, both wait overloads return
+// *true* on failure or timeout and false once the semaphore is acquired.
+
+Semaphore::Impl::Impl(ssize_t initialValue) {
+  assert(initialValue >= 0 && "semaphore initial value cannot be negative");
+  sema = ::CreateSemaphoreW(/*lpSemaphoreAttributes=*/nullptr,
+                            static_cast<LONG>(initialValue),
+                            /*lMaximumCount=*/LONG_MAX, /*lpName=*/nullptr);
+  if (sema == nullptr)
+    llvm::report_fatal_error("Unable to create a semaphore.");
+}
+
+Semaphore::Impl::~Impl() {
+  [[maybe_unused]] BOOL rc = ::CloseHandle(sema);
+  assert(rc && "Unable to close the semaphore handle.");
+}
+
+void Semaphore::Impl::post() {
+  ::ReleaseSemaphore(sema, /*lReleaseCount=*/1, /*lpPreviousCount=*/nullptr);
+}
+
+bool Semaphore::Impl::wait() {
+  // Unlike sem_wait there is no EINTR to loop over: an alertable wait is opt-in
+  // and this one is not alertable, so it only returns once signalled.
+  return ::WaitForSingleObject(sema, INFINITE) != WAIT_OBJECT_0;
+}
+
+bool Semaphore::Impl::wait(int64_t timeoutNS) {
+  // WaitForSingleObject counts whole milliseconds, so round up: truncating a
+  // sub-millisecond timeout to zero would turn a short wait into a poll.
+  const int64_t timeoutMS = (timeoutNS + 999999) / 1000000;
+  DWORD rc = ::WaitForSingleObject(sema, static_cast<DWORD>(timeoutMS));
+  if (rc == WAIT_OBJECT_0)
+    return false;
+  if (rc == WAIT_TIMEOUT)
+    return true;
+  llvm::report_fatal_error(
+      "WaitForSingleObject failed for a reason other than a timeout.");
 }
 
 #else

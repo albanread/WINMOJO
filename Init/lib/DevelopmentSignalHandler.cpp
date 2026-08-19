@@ -17,11 +17,19 @@
 #include "llvm/Support/Threading.h"
 
 #include <csignal>
+#include <cstdlib>
 #include <ctime>
 #include <sstream>
-#include <sys/ucontext.h>
 #include <thread>
+
+#ifndef _WIN32
+// siginfo_t and ucontext_t. The detailed signal capture below is POSIX only:
+// Windows has no sigaction, and of the signals this file names it only has
+// SIGABRT, SIGFPE, SIGILL, SIGSEGV and SIGTERM. Windows keeps LLVM's own
+// handler, which is built on SEH, plus crashpad for real crash reports.
+#include <sys/ucontext.h>
 #include <unistd.h>
+#endif
 
 using namespace M;
 
@@ -42,6 +50,8 @@ static SignalInfo &signalInformation() {
   static SignalInfo signalInfo;
   return signalInfo;
 }
+
+#ifndef _WIN32
 
 static const char *getSignalName(int sig) {
   switch (sig) {
@@ -213,6 +223,8 @@ static void captureSignalInformation(int sig, siginfo_t *info, void *context) {
   llvm::sys::RunSignalHandlers();
 }
 
+#endif // !_WIN32
+
 static void logHostMachineInfo(llvm::raw_fd_ostream &crashLog) {
   auto hostMachineOr = M::getHostMachineInfo();
   if (hostMachineOr.isError()) {
@@ -244,7 +256,10 @@ static void developmentSignalHandler(void *context) {
   // Store the original signal before potentially triggering SIGUSR2
   int originalSignal = signalInformation().signal;
 
-  // Print Python stack trace if available using async-safe approach
+  // Print Python stack trace if available using async-safe approach.
+  // SIGUSR2 does not exist on Windows, so there is no signal to raise and the
+  // faulthandler hook cannot be reached this way.
+#ifndef _WIN32
   if (pythonStackTraceEnabled) {
     llvm::errs() << "Python stack trace:\n";
     // Send SIGUSR2 to trigger faulthandler which is async signal safe.
@@ -253,6 +268,7 @@ static void developmentSignalHandler(void *context) {
     std::raise(SIGUSR2);
     llvm::errs() << "\n";
   }
+#endif // !_WIN32
 
   logHostMachineInfo(llvm::errs());
 
@@ -278,6 +294,10 @@ void M::Init::registerDevelopmentSignalHandler(llvm::StringRef programName) {
     // Then install our sigaction handlers after LLVM's handlers are set up.
     // This ensures our handlers get called first, then chain to LLVM's
     // handlers.
+    // Windows stops here: LLVM's handler above is installed through SEH and
+    // still produces a stack trace, but there is no sigaction to augment it
+    // with, and half the signals below do not exist on the platform.
+#ifndef _WIN32
     struct sigaction sa;
     sa.sa_sigaction = captureSignalInformation;
     sa.sa_flags = SA_SIGINFO | SA_RESTART;
@@ -291,6 +311,7 @@ void M::Init::registerDevelopmentSignalHandler(llvm::StringRef programName) {
     sigaction(SIGBUS, &sa, nullptr);  // Bus error
     sigaction(SIGTRAP, &sa, nullptr); // Trace/breakpoint trap
     sigaction(SIGSYS, &sa, nullptr);  // Bad system call
+#endif // !_WIN32
   });
 }
 

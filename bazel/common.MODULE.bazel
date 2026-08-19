@@ -123,6 +123,8 @@ single_version_override(
         # LINK_OPTS' Windows branch was written for MinGW and asks for
         # pthread.lib and m.lib, which do not exist against the MSVC ABI.
         "//bazel/public-patches:protobuf-windows-link-opts.patch",
+        # CommandLineToArgvW lives in shell32.
+        "//bazel/public-patches:protobuf-windows-shell32.patch",
     ],
 )
 
