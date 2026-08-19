@@ -168,6 +168,9 @@ single_version_override(
         # Weak definitions in an archive are not pulled in by a weak reference,
         # which ELF tolerates and lld-link does not.
         "//bazel/public-patches:abseil-alwayslink-weak-definitions.patch",
+        # The rest of the weak-definition targets: tracing, stacktrace,
+        # leak_check, flags config, log_message and time.
+        "//bazel/public-patches:abseil-alwayslink-more-weak-definitions.patch",
     ],
     version = "20250814.2",
 )
