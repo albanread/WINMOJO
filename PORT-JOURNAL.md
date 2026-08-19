@@ -458,6 +458,40 @@ The last is worth doing regardless: it separates "is the toolchain right" from
 "does the repo's dependency graph resolve on Windows", which are independent
 risks currently entangled.
 
+### The toolchain itself is proven correct
+
+Bypassed Bazel entirely and drove `clang++.exe` with the exact flag set the
+`windows-arm64` toolchain would use — every `cc_args` from `args/BUILD.bazel`
+plus the include and library paths `windows_sysroot_repository` generated.
+Preserved as `bazel/internal/cc-toolchain/smoke/toolchain_check.sh` so it can be
+re-run whenever the toolchain args change.
+
+Result: compiles, links, and runs.
+
+```
+winmojo smoke ok: windows-arm64-clang
+pointer width: 64 bits
+```
+
+`dumpbin` reports `AA64 machine (ARM64)`, Windows CUI subsystem, 153,600 bytes.
+
+This decouples two risks that were entangled: **the toolchain design is sound**,
+and everything still failing is dependency-graph plumbing. It also settles the
+open question from G2 — `-fno-exceptions` and `-fno-rtti` *do* work against the
+MSVC STL, so `<vector>` and `<string>` compile despite the STL's use of
+exceptions internally. That had been the largest unknown in the flag set.
+
+**And it found a real bug that Bazel had not yet reached.**
+`windows_sysroot_repository` emitted `-imsvc` for the MSVC and SDK include
+directories. `-imsvc` is a **clang-cl** flag; the clang driver rejects it with
+`error: unknown argument: '-imsvc'`. Since the toolchain deliberately uses the
+clang driver rather than clang-cl to keep the GNU-style args working, the
+correct spelling is `-isystem`. Fixed.
+
+Worth noting the sequencing: this bug sat behind the pip/Winsock failures and
+would only have surfaced after they were solved. Testing the toolchain directly
+found it immediately, which is a good argument for keeping that script around.
+
 ### Repository state
 
 The fork now has a real remote: `origin` =

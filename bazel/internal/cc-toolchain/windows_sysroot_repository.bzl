@@ -133,8 +133,12 @@ def _windows_sysroot_repository_impl(rctx):
 
     include_args = []
     for path in includes:
-        # -imsvc marks these as system headers so third-party warnings stay quiet.
-        include_args.append("-imsvc")
+        # -isystem, not -imsvc: the latter is a clang-cl flag and the clang
+        # driver rejects it outright with "unknown argument". Both mark the
+        # directory as containing system headers so warnings there stay quiet,
+        # which matters because the toolchain compiles with -Wall -Wextra
+        # -pedantic and several -Werror= flags.
+        include_args.append("-isystem")
         include_args.append(path)
 
     lib_args = ["-L" + path for path in libs]
