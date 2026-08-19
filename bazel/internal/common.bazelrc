@@ -227,23 +227,22 @@ build:macos --spawn_strategy=remote,worker,sandboxed,standalone
 build:macos --strategy=CppCompile=dynamic,remote,worker,sandboxed,standalone
 build:macos --strategy=CppLink=dynamic,remote,worker,sandboxed,standalone
 
-build:windows --spawn_strategy=remote,worker,standalone
-
 # https://github.com/bazelbuild/bazel/issues/25221
 build --strategy=TestRunner=remote,worker,sandboxed,standalone
 
-# Bazel implements sandboxing with Linux namespaces and a macOS equivalent, so
-# there is no 'sandboxed' strategy on Windows and naming it is a hard error
-# rather than a fallback. This re-states the line above without it, and relies
-# on --enable_platform_specific_config applying it only on Windows hosts.
-build:windows --strategy=TestRunner=remote,worker,standalone
+# NOTE: the Windows equivalents of the strategy lines above are emitted by
+# tools/bazel.bat into build/wrapper.bazelrc, not written here. Bazel has no
+# 'sandboxed' strategy on Windows and naming one is a hard error rather than a
+# fallback, so it has to be removed rather than overridden. A build:windows
+# section cannot do that: an auto-applied --config=windows expands before these
+# unconditional lines and is then overridden by them. wrapper.bazelrc is
+# imported after this file, so it wins, and it is already where the wrapper puts
+# host-specific configuration such as the macOS Xcode settings.
 
 build:linux --build_metadata=TAG_HOST_OS=linux
 build:linux --build_metadata=TAG_TARGET_OS=linux
 build:macos --build_metadata=TAG_HOST_OS=macos
 build:macos --build_metadata=TAG_TARGET_OS=macos
-build:windows --build_metadata=TAG_HOST_OS=windows
-build:windows --build_metadata=TAG_TARGET_OS=windows
 
 # Separate CI config that doesn't affect build output for verifying we share caches
 build:ci-no-config --curses=no

@@ -50,10 +50,21 @@ if not exist "%BAZELRC_ROOT%\local-resources.bazelrc" (
 set "WHO=%USERNAME%"
 if not "%GITHUB_ACTOR%"=="" set "WHO=%GITHUB_ACTOR%"
 
+REM This file is imported after bazel/internal/common.bazelrc, so anything
+REM written here overrides it. That ordering is the point: Bazel has no
+REM 'sandboxed' strategy on Windows and naming one is a hard error rather than a
+REM fallback, so the strategy lines have to be restated without it. A
+REM build:windows section cannot do that, because an auto-applied
+REM --config=windows expands before those unconditional lines and is then
+REM overridden by them.
 > "%BAZELRC_ROOT%\wrapper.bazelrc" (
-  echo # Generated from tools/bazel.cmd, do not edit.
+  echo # Generated from tools/bazel.bat, do not edit.
   echo build --build_metadata=USER=%WHO%
   if "%GITHUB_REPOSITORY%"=="" echo build --config=disk-cache
+  echo build --build_metadata=TAG_HOST_OS=windows
+  echo build --build_metadata=TAG_TARGET_OS=windows
+  echo build --spawn_strategy=remote,worker,standalone
+  echo build --strategy=TestRunner=remote,worker,standalone
   echo import %%workspace%%/build/local-resources.bazelrc
 )
 
