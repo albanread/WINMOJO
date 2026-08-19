@@ -127,11 +127,63 @@ cc_library(
     target_compatible_with = ["@platforms//os:linux"],
 )
 
+# _MINI_CHROMIUM_SRCS is really the POSIX list: mini_chromium's own base/BUILD.gn
+# puts these behind `if (mini_chromium_is_posix || mini_chromium_is_fuchsia)`,
+# but they are unconditional above. They have to be subtracted on Windows rather
+# than merely adding the _win.cc files alongside, or the POSIX and Windows
+# implementations of lock_impl, thread_local_storage and page_size collide.
+_MINI_CHROMIUM_POSIX_ONLY_SRCS = [
+    "third_party/mini_chromium/mini_chromium/base/files/file_util_posix.cc",
+    "third_party/mini_chromium/mini_chromium/base/memory/page_size_posix.cc",
+    "third_party/mini_chromium/mini_chromium/base/posix/eintr_wrapper.h",
+    "third_party/mini_chromium/mini_chromium/base/posix/safe_strerror.cc",
+    "third_party/mini_chromium/mini_chromium/base/posix/safe_strerror.h",
+    "third_party/mini_chromium/mini_chromium/base/strings/string_util_posix.h",
+    "third_party/mini_chromium/mini_chromium/base/synchronization/condition_variable_posix.cc",
+    "third_party/mini_chromium/mini_chromium/base/synchronization/lock_impl_posix.cc",
+    "third_party/mini_chromium/mini_chromium/base/threading/thread_local_storage_posix.cc",
+]
+
+# From base/BUILD.gn's `else if (mini_chromium_is_win)` block.
+_MINI_CHROMIUM_WIN_SRCS = [
+    "third_party/mini_chromium/mini_chromium/base/memory/page_size_win.cc",
+    "third_party/mini_chromium/mini_chromium/base/scoped_clear_last_error_win.cc",
+    "third_party/mini_chromium/mini_chromium/base/strings/string_util_win.cc",
+    "third_party/mini_chromium/mini_chromium/base/strings/string_util_win.h",
+    "third_party/mini_chromium/mini_chromium/base/synchronization/lock_impl_win.cc",
+    "third_party/mini_chromium/mini_chromium/base/threading/thread_local_storage_win.cc",
+]
+
+# Matches mini_chromium's build/config/BUILD.gn config("default") for Windows.
+# _HAS_EXCEPTIONS=0 agrees with the -fno-exceptions the toolchain already passes;
+# disagreeing would give ODR violations against the MSVC STL.
+_WIN_DEFINES = [
+    "NOMINMAX",
+    "UNICODE",
+    "_UNICODE",
+    "WIN32_LEAN_AND_MEAN",
+    "_CRT_SECURE_NO_WARNINGS",
+    "_HAS_EXCEPTIONS=0",
+]
+
+cc_library(
+    name = "mini_chromium_windows",
+    srcs = [src for src in _MINI_CHROMIUM_SRCS if src not in _MINI_CHROMIUM_POSIX_ONLY_SRCS] +
+           _MINI_CHROMIUM_WIN_SRCS,
+    copts = ["-std=c++14"],
+    defines = _WIN_DEFINES,
+    includes = ["third_party/mini_chromium/mini_chromium"],
+    # rand_util.cc reaches RtlGenRandom via SystemFunction036.
+    linkopts = ["-ladvapi32"],
+    target_compatible_with = ["@platforms//os:windows"],
+)
+
 alias(
     name = "mini_chromium",
     actual = select({
         "@platforms//os:linux": ":mini_chromium_linux",
         "@platforms//os:macos": ":mini_chromium_macos",
+        "@platforms//os:windows": ":mini_chromium_windows",
     }),
 )
 
@@ -390,20 +442,129 @@ objc_library(
     ],
 )
 
+# As with mini_chromium, _UTIL_MULTIPLATFORM_SRCS is really the POSIX list.
+_UTIL_POSIX_ONLY_SRCS = [
+    "util/file/directory_reader_posix.cc",
+    "util/file/file_io_posix.cc",
+    "util/file/filesystem_posix.cc",
+    "util/misc/clock_posix.cc",
+    "util/posix/close_multiple.cc",
+    "util/posix/close_stdio.cc",
+    "util/posix/scoped_dir.cc",
+    "util/posix/signals.cc",
+    "util/posix/spawn_subprocess.cc",
+    "util/synchronization/semaphore_posix.cc",
+    "util/thread/thread_posix.cc",
+]
+
+# From util/BUILD.gn's `if (crashpad_is_win)` block. Note util/misc/time.cc stays
+# in the multiplatform list on purpose: GN keeps it platform-neutral and it
+# shares no symbols with time_win.cc.
+_UTIL_WIN_SRCS = [
+    "util/file/directory_reader_win.cc",
+    "util/file/file_io_win.cc",
+    "util/file/filesystem_win.cc",
+    "util/misc/clock_win.cc",
+    "util/misc/paths_win.cc",
+    "util/misc/time_win.cc",
+    "util/process/process_memory_win.cc",
+    "util/synchronization/semaphore_win.cc",
+    "util/thread/thread_win.cc",
+    "util/win/command_line.cc",
+    "util/win/critical_section_with_debug_info.cc",
+    "util/win/exception_handler_server.cc",
+    "util/win/get_function.cc",
+    "util/win/get_module_information.cc",
+    "util/win/handle.cc",
+    "util/win/initial_client_data.cc",
+    "util/win/loader_lock.cc",
+    "util/win/module_version.cc",
+    "util/win/nt_internals.cc",
+    "util/win/ntstatus_logging.cc",
+    "util/win/process_info.cc",
+    "util/win/registration_protocol_win.cc",
+    "util/win/scoped_handle.cc",
+    "util/win/scoped_local_alloc.cc",
+    "util/win/scoped_process_suspend.cc",
+    "util/win/scoped_set_event.cc",
+    "util/win/session_end_watcher.cc",
+    "util/net/http_transport_win.cc",
+]
+
+cc_library(
+    name = "util_windows",
+    srcs = [src for src in _UTIL_MULTIPLATFORM_SRCS if src not in _UTIL_POSIX_ONLY_SRCS] +
+           _UTIL_WIN_SRCS + [
+        "package.h",
+        # CaptureContext is what snapshots the CPU state at the fault, so its
+        # ARM64 unwind data is what makes a crash walkable. It is hand-written
+        # armasm64 assembly, a dialect clang-cl cannot assemble, so crashpad
+        # ships this pre-assembled object for exactly this situation. Building
+        # it from the .asm needs armasm64.exe driven by a genrule; see the port
+        # journal.
+        "util/misc/capture_context_win_arm64.obj",
+    ],
+    hdrs = glob(["util/**/*.h"]),
+    copts = [
+        "-std=c++17",
+        # Nameless struct/union, used throughout the Windows headers.
+        "-Wno-microsoft-anon-tag",
+        "-Wno-nontrivial-memcall",
+    ],
+    defines = _WIN_DEFINES + ["ZLIB_CONST"],
+    linkopts = [
+        "-luser32",  # win/session_end_watcher.cc
+        "-lversion",  # win/module_version.cc: GetFileVersionInfo, VerQueryValue
+        "-lwinhttp",  # net/http_transport_win.cc
+        "-ladvapi32",
+    ],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":compat",
+        ":mini_chromium",
+        ":zlib",
+    ],
+)
+
 alias(
     name = "util",
     actual = select({
         "@platforms//os:linux": ":util_linux",
         "@platforms//os:macos": ":util_macos",
+        "@platforms//os:windows": ":util_windows",
     }),
 )
 
+# compat/win and compat/non_win are mutually exclusive: non_win supplies stand-in
+# windows.h, winnt.h, dbghelp.h and friends for non-Windows hosts, and having it
+# on the search path on Windows would shadow the real SDK headers. On Windows
+# compat is also a real library rather than headers only, since strings.cc and
+# time.cc provide the POSIX shims crashpad expects.
 cc_library(
     name = "compat",
-    hdrs = glob(["compat/**/*.h"]),
-    includes = ["compat/non_win"] + select({
+    srcs = select({
+        "@platforms//os:windows": [
+            "compat/win/strings.cc",
+            "compat/win/time.cc",
+            "third_party/getopt/getopt.cc",
+        ],
+        "//conditions:default": [],
+    }),
+    hdrs = glob(["compat/**/*.h"]) + select({
+        "@platforms//os:windows": ["third_party/getopt/getopt.h"],
+        "//conditions:default": [],
+    }),
+    includes = select({
+        "@platforms//os:windows": ["compat/win"],
+        "//conditions:default": ["compat/non_win"],
+    }) + select({
         "@platforms//os:linux": ["compat/linux"],
         "@platforms//os:macos": [],
+        "@platforms//os:windows": [],
+    }),
+    deps = select({
+        "@platforms//os:windows": [":mini_chromium"],
+        "//conditions:default": [],
     }),
 )
 
@@ -460,11 +621,38 @@ cc_library(
     ],
 )
 
+# crashpad_client_win.cc is what registers the process with the out-of-process
+# handler and installs the SEH hooks: SetUnhandledExceptionFilter plus
+# WerRegisterRuntimeExceptionModule for the faults an unhandled-exception filter
+# never sees, such as fast-fail and stack exhaustion. Dumps are written by the
+# handler process, not from inside the faulting process, which is what makes
+# them safe to take from an arbitrary exception context.
+cc_library(
+    name = "client_windows",
+    srcs = _CLIENT_SRCS + [
+        "client/crash_report_database_win.cc",
+        "client/crashpad_client_win.cc",
+    ],
+    hdrs = glob(["client/**/*.h"]),
+    copts = [
+        "-Wno-microsoft-anon-tag",
+    ],
+    defines = _WIN_DEFINES,
+    linkopts = ["-lrpcrt4"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":compat",
+        ":mini_chromium",
+        ":util",
+    ],
+)
+
 alias(
     name = "client",
     actual = select({
         "@platforms//os:linux": ":client_linux",
         "@platforms//os:macos": ":client_macos",
+        "@platforms//os:windows": ":client_windows",
     }),
     visibility = ["//visibility:public"],
 )
