@@ -31,11 +31,18 @@ Read via `vulkaninfo.exe` from the Adreno driver store package
 | fp16 / int8 / int16 shaders | yes / yes / yes | |
 | `subgroupSizeControl` | yes | |
 
-**The wave-64 match to AMD CDNA is the single most useful fact here.** Where
-`max/kernels` has divergent NVIDIA-32 and AMD-64 paths, the AMD path is the
-closer starting point for Adreno, not the NVIDIA one. 32 KiB of shared memory
-is the tightest constraint — under half of AMD's and a seventh of Hopper's, so
-tile sizes copied from either vendor's matmul will not fit.
+**Caution on that subgroup size — it is not the whole story.** Vulkan reports
+64 here, but D1b measured OpenCL returning a *per-kernel* preferred multiple of
+64 or 128 on this same device (`probe_opencl_exec.py`). The scheduling width is
+not a device constant on Adreno the way it is on NVIDIA and AMD. See
+`../../DRAGONMAX-JOURNAL.md` for the measurement.
+
+The AMD wave-64 kernel paths remain the better starting point than NVIDIA's 32,
+since 64 divides both observed widths — but nothing should *assume* 64.
+
+32 KiB of shared memory is the tightest constraint — under half of AMD's and a
+seventh of Hopper's, so tile sizes copied from either vendor's matmul will not
+fit.
 
 ### Driver-level APIs available now
 

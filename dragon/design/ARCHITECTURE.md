@@ -139,8 +139,20 @@ legible and rebasing onto upstream stays possible.
 
 ## Two rules this design commits to
 
-**Wave 64, not 32.** Adreno's subgroup is 64, matching AMD CDNA rather than
-NVIDIA. Where `max/kernels` forks by vendor, start from the HIP path.
+**Never hardcode the wave width.** Vulkan reports `subgroupSize = 64`, but
+D1b measured OpenCL's `CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE` returning
+**64 for one kernel and 128 for two others on the same device**. Adreno's
+scheduling width is a *per-kernel* property, unlike NVIDIA's fixed 32 and AMD
+CDNA's fixed 64. Query it after compiling each kernel.
+
+The reason for the variation is **not yet known** — register pressure was the
+obvious hypothesis and the measurement contradicts it. Until it is understood,
+treat any cross-lane assumption as suspect.
+
+Practical consequence for kernel selection: the HIP (wave-64) paths in
+`max/kernels` are still the better starting point than the CUDA ones, since 64
+divides both observed widths. But "Adreno is wave-64" is not a fact to build
+on.
 
 **Re-derive every tile size.** Adreno gives 32 KiB of shared memory per
 workgroup — under half of AMD's 64 KiB, a seventh of Hopper's 228 KiB. Every

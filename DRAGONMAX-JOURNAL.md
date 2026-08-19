@@ -296,3 +296,93 @@ kind of bug that hides.
 W1 (extract the ABI spec) needs nothing and can start now. So can W4's QNN
 harness, which never needs `mojo.exe`. D1b still wants a checked numeric result
 out of each surface.
+
+---
+
+## 2026-08-19 — W1 done, and D1b runs a real kernel on the Adreno
+
+### W1 — the ABI spec is generated, not transcribed
+
+`dragon/runtime/extract_abi.py` walks the bindings and emits
+`dragon/runtime/ABI.md`. **109 symbols, 94 of them (86%) with the real C
+prototype** recovered from the comment above each `external_call`.
+
+First attempt recovered only 26. The bug: the comment is not always on the line
+directly above, because calls are usually wrapped —
+
+```mojo
+# const char *AsyncRT_DeviceContext_hip_device(hipDevice_t *result, ...)
+_checked(
+    external_call["AsyncRT_DeviceContext_hip_device", _CString[]](
+```
+
+— so a bare `_checked(` sits between comment and call. Scanning back over
+intervening code, and accepting a comment block only when it *names the symbol*,
+took it to 94. The name check is what makes the wider scan safe.
+
+Generated rather than hand-written on purpose: 109 hand transcriptions is 109
+chances at an error that only shows up as a wrong-arguments crash in a foreign
+process. `--check` fails when stale, so a rebase that changes the interface is
+reported rather than silently absorbed.
+
+Tiers came out core 68 / graph 19 / vendor 14 / multigpu 8. All **33** hand-picked
+bring-up symbols verified present in the bindings.
+
+**Three structural findings, none of them in any Modular document:**
+
+1. `const char *AsyncRT_DeviceContext_create(const DeviceContext **result,
+   const char *api, int id)` — `api` is a **plain runtime string**
+   (`"cpu"`, `"cuda"`, `"hip"`, `"metal"`), not an enum, not a compile-time
+   parameter. The device runtime is a string-dispatched factory, and since we
+   implement it, we own the dispatch.
+2. `"cpu"` goes through the same interface, so AsyncRT's **published**
+   `CPUDevice` is a working reference for the ABI's shape.
+3. **77 of 109 calls return `const char *`**: null is success, non-null is an
+   error message the *caller* owns and must release with
+   `AsyncRT_DeviceContext_strfree`. Traced through `_checked` →
+   `_raise_checked_impl` → `_string_from_owned_charptr`. Get the ownership rule
+   wrong and it leaks on every error path.
+
+### D1b — a real kernel, verified
+
+`dragon/probe/probe_opencl_exec.py`: saxpy over 4096 floats on the QUALCOMM
+platform, **every element checked against the host**. Qualcomm's OpenCL compiler
+accepted the source; context, buffers, H2D, launch, D2H and `clFinish` all work.
+Deliberately the same operations as the ABI bring-up subset, so what it learns
+transfers straight to `dragon/runtime/`.
+
+### The wave width is not a device constant
+
+Vulkan said `subgroupSize = 64`. OpenCL disagreed, so I measured three kernels:
+
+| kernel | max WG | preferred multiple |
+|---|---|---|
+| `saxpy` | 1024 | **128** |
+| `wave_probe` | 1024 | **64** |
+| `reg_heavy` | 1024 | **128** |
+
+**Established: the preferred multiple varies by kernel on the same device.**
+That is unlike NVIDIA's fixed 32 and AMD CDNA's fixed 64. Query it per kernel
+after compilation; never hardcode it, and never derive it from Vulkan's
+`subgroupSize`.
+
+**Not established: why.** Register pressure was the hypothesis, and I wrote
+`reg_heavy` specifically to test it — 64 live floats in a dependent chain. The
+data contradicts the simple form of it: `reg_heavy` reports the same 128 as
+trivial `saxpy`, while the even more trivial `wave_probe` reports 64. Cause
+unknown. Recorded as unknown rather than guessed at.
+
+This retires the "Adreno is wave-64, use the HIP paths" rule from
+`ARCHITECTURE.md` in its confident form. The HIP paths are still the better
+starting point — 64 divides both observed widths — but "Adreno is wave-64" is
+not a fact to build on. Both design docs corrected.
+
+Also worth noting for later: the Qualcomm driver reports `CL_DEVICE_MAX_COMPUTE_UNITS`
+as 3 and `MAX_CLOCK_FREQUENCY` as 1 MHz. The clock is garbage (already known);
+3 CUs is plausible for an X1-45 but should not be trusted for occupancy maths
+until something independent confirms it.
+
+### Next
+
+D1b's remaining half: a trivial graph on HTP V81 through QNN. That is also the
+start of W4, and it needs no `mojo.exe`.
