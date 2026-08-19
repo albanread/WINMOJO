@@ -759,7 +759,22 @@ static int linkOutput(OutputType outputType, const State &state,
   if (!std::filesystem::exists(compilerRTPath.str(), ec) || ec)
     return state.reportError("unable to locate Mojo CompilerRT library");
 
-  // Invoke the linker command.
+#if defined(_WIN32)
+  // The configuration names the .dll because the JIT path loads that file
+  // directly, but a PE link consumes the import library sitting beside it.
+  // One config key, two consumers; the translation belongs at the link line.
+  std::string compilerRTImportLib;
+  if (compilerRTPath.ends_with_insensitive(".dll")) {
+    compilerRTImportLib = (compilerRTPath.drop_back(4) + ".lib").str();
+    if (std::filesystem::exists(compilerRTImportLib, ec) && !ec)
+      compilerRTPath = compilerRTImportLib;
+  }
+#endif
+
+  // Invoke the linker command. wholeArchiveArg lives at function scope
+  // because the linker argument vector holds StringRefs into it until the
+  // command runs.
+  std::string wholeArchiveArg;
   SmallVector<StringRef> linkerArgs = [&] {
     if (outputType == OutputType::executable)
       return SmallVector<StringRef>{*linker, archivePath, compilerRTPath};
@@ -774,6 +789,11 @@ static int linkOutput(OutputType outputType, const State &state,
 #if defined(__APPLE__)
     linkerInvocation.push_back("-Wl,-force_load");
     linkerInvocation.push_back(archivePath);
+#elif defined(_WIN32)
+    // lld-link ignores the GNU spelling with a warning, which silently drops
+    // the force-load and strips every "unused" export from the library.
+    wholeArchiveArg = "-Wl,/WHOLEARCHIVE:" + archivePath;
+    linkerInvocation.push_back(wholeArchiveArg);
 #else
     linkerInvocation.push_back("-Wl,--whole-archive");
     linkerInvocation.push_back(archivePath);
