@@ -151,6 +151,32 @@ single_version_override(
 # protoc-gen-validate copies grpc's Python block verbatim, so it needs the same
 # treatment for the same reason: no aarch64-pc-windows-msvc runtime exists below
 # 3.11, and its pgv_pip_deps hub cannot resolve a 3.9 interpreter.
+# boringssl's util.bzl selects /std:c11 on Windows, the MSVC spelling that only
+# clang-cl accepts. Same root cause as the curl and zlib-ng patches. boringssl
+# arrives transitively rather than as a direct bazel_dep, so the version here is
+# the one bzlmod actually resolves.
+single_version_override(
+    module_name = "boringssl",
+    patch_strip = 1,
+    patches = [
+        "//bazel/public-patches:boringssl-clang-driver-flags.patch",
+    ],
+    version = "0.20241024.0",
+)
+
+# curl's Windows copts use MSVC /D spellings, which only clang-cl accepts. Same
+# root cause as the zlib-ng patch below: this port drives the ordinary clang
+# driver against the MSVC ABI, where a leading slash is a file path. This was by
+# far the largest single source of failures in the first full build.
+single_version_override(
+    module_name = "curl",
+    patch_strip = 1,
+    patches = [
+        "//bazel/public-patches:curl-clang-driver-flags.patch",
+    ],
+    version = "8.12.0",
+)
+
 # zlib-ng's Windows copts are MSVC /wd#### warning numbers, which only clang-cl
 # understands. This port drives the ordinary clang driver against the MSVC ABI,
 # where a leading slash is read as a file path, so every zlib-ng translation

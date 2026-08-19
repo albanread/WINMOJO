@@ -96,11 +96,18 @@ builtin_module_map(
             "@clang-macos//:include_dir",
             "@sysroot-macos//sysroot:root",
         ],
-        # No sysroot directory to pair with the clang builtin headers here: the
-        # MSVC and SDK include paths arrive as -isystem flags from
-        # windows_sysroot_repository rather than as a directory tree.
+        # The MSVC STL and SDK headers have to be in the module map too, not
+        # just clang's builtin headers. layering_check otherwise rejects every
+        # #include <atomic>, <string> and friends with "does not depend on a
+        # module exporting", because those headers belong to no module at all.
+        # The other platforms get this via their sysroot directory.
         "//:windows_arm64": [
             "@clang-windows-arm64//:include_dir",
+            "@sysroot-windows-arm64//vc_include:dir",
+            "@sysroot-windows-arm64//sdk_ucrt:dir",
+            "@sysroot-windows-arm64//sdk_shared:dir",
+            "@sysroot-windows-arm64//sdk_um:dir",
+            "@sysroot-windows-arm64//sdk_winrt:dir",
         ],
     }),
     tags = ["manual"],

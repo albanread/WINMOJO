@@ -90,19 +90,32 @@ def _declare_windows_tools(platform):
         tags = ["manual"],
     )
 
-    # lld-link is the actual linker the clang driver spawns for a
-    # *-pc-windows-msvc target, so it must be present in the tool's runfiles.
+    # Driven through .bat wrappers rather than binding clang.exe directly. The
+    # parse_headers feature works by setting PARSE_HEADER and expecting the
+    # compiler wrapper to create that file, which is what the .sh wrappers do on
+    # the other platforms; binding the binary directly means the marker is never
+    # created and every header parse fails with "not all outputs were created".
+    #
+    # lld-link is the linker the clang driver spawns for a *-pc-windows-msvc
+    # target, so it has to be present in the tool's runfiles.
     cc_tool(
         name = "{}-clang".format(platform),
-        src = "@clang-{}//:bin/clang{}".format(platform, ext),
-        data = ["@clang-{}//:ld".format(platform)],
+        src = ":windows-clang.bat",
+        data = [
+            "@clang-{}//:bin/clang{}".format(platform, ext),
+            "@clang-{}//:ld".format(platform),
+        ],
         tags = ["manual"],
     )
 
     cc_tool(
         name = "{}-clang++".format(platform),
-        src = "@clang-{}//:bin/clang++{}".format(platform, ext),
-        data = ["@clang-{}//:ld".format(platform)],
+        src = ":windows-clang++.bat",
+        data = [
+            "@clang-{}//:bin/clang++{}".format(platform, ext),
+            "@clang-{}//:bin/clang{}".format(platform, ext),
+            "@clang-{}//:ld".format(platform),
+        ],
         tags = ["manual"],
     )
 

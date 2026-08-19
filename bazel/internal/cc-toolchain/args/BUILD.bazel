@@ -156,6 +156,19 @@ cc_args(
         "@platforms//os:windows": [],
         "//conditions:default": ["-fPIC"],
     }) + select({
+        # windows.h defines min and max as function-like macros, which breaks
+        # any use of std::numeric_limits<T>::max() and std::min/std::max in
+        # every header that transitively includes it. NOMINMAX is the standard
+        # remedy and belongs here rather than per-target, since it has to hold
+        # for third-party code too. WIN32_LEAN_AND_MEAN drops the rarely-needed
+        # sub-headers, which cuts both compile time and the number of macros
+        # leaking into the global namespace.
+        "@platforms//os:windows": [
+            "-DNOMINMAX",
+            "-DWIN32_LEAN_AND_MEAN",
+        ],
+        "//conditions:default": [],
+    }) + select({
         # On Windows the MSVC headers select the matching CRT import library
         # through #pragma comment(lib, ...), which is exactly what -fno-autolink
         # suppresses. Leaving it off lets the debug/release and static/dynamic
