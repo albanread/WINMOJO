@@ -118,6 +118,7 @@ cc_sysroot(
             # like.
             "@platforms//os:windows": [
                 "//bazel/internal/cc-toolchain/features:compiler_param_file",
+                "//bazel/internal/cc-toolchain/features:copy_dynamic_libraries_to_binary",
                 "@rules_cc//cc/toolchains/features/legacy:linker_param_file",
             ],
             "//conditions:default": [],

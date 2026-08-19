@@ -110,16 +110,24 @@ def _shared_library_impl(ctx):
         **link_kwargs
     )
 
-    dwarf_outputs.append(linking_outputs.library_to_link.resolved_symlink_dynamic_library)
+    # resolved_symlink_dynamic_library is None when the toolchain enables
+    # copy_dynamic_libraries_to_binary, which Windows needs because it has no
+    # rpath and therefore locates a DLL through the executable's directory. In
+    # that mode Bazel copies the library rather than symlinking it, so fall back
+    # to the library itself.
+    lib = linking_outputs.library_to_link
+    dynamicLibrary = lib.resolved_symlink_dynamic_library or lib.dynamic_library
+
+    dwarf_outputs.append(dynamicLibrary)
     output_group_kwargs["modular_dwarf"] = depset(dwarf_outputs)
 
     # TODO: Change name to output beside the main library once we can rename in release packaging
     stripped_output = ctx.actions.declare_file(
-        ctx.label.name + ".stripped/" + linking_outputs.library_to_link.resolved_symlink_dynamic_library.basename,
+        ctx.label.name + ".stripped/" + dynamicLibrary.basename,
     )
     register_strip_action(
         ctx = ctx,
-        input_file = linking_outputs.library_to_link.resolved_symlink_dynamic_library,
+        input_file = dynamicLibrary,
         output_file = stripped_output,
     )
 
@@ -146,7 +154,7 @@ def _shared_library_impl(ctx):
             **output_group_kwargs
         ),
         DefaultInfo(
-            executable = linking_outputs.library_to_link.resolved_symlink_dynamic_library,
+            executable = dynamicLibrary,
             runfiles = ctx.runfiles().merge_all(transitive_runfiles),
         ),
         CcInfo(

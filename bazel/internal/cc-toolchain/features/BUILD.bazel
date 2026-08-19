@@ -19,6 +19,17 @@ package(default_visibility = ["//visibility:public"])
 # overruns that limit. Link actions solve the same problem by binding clang++
 # directly instead.
 
+# Bazel's own feature: with it enabled, the C++ rules place a binary's dynamic
+# dependencies next to the executable rather than leaving them in _solib_.
+# Windows needs it because there is no rpath, so a DLL is found through the
+# executable's directory and the search path. Without it, mojo.exe builds fine
+# and then fails at 0xC0000135, STATUS_DLL_NOT_FOUND, the moment Bazel runs it
+# as a build tool.
+cc_feature(
+    name = "copy_dynamic_libraries_to_binary",
+    feature_name = "copy_dynamic_libraries_to_binary",
+)
+
 cc_feature(
     name = "compiler_param_file",
     feature_name = "compiler_param_file",
