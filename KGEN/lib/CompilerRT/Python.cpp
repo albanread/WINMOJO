@@ -19,6 +19,14 @@
 #include <cctype>
 
 #ifdef _WIN32
+// popen and pclose are spelled with a leading underscore on Windows and live in
+// <stdio.h> rather than <unistd.h>.
+#include <cstdio>
+#define popen _popen
+#define pclose _pclose
+#endif
+
+#ifdef _WIN32
 #include <windows.h>
 #endif
 

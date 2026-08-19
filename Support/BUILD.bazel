@@ -441,6 +441,13 @@ modular_cc_library(
     name = "Threading",
     srcs = glob(["lib/Threading/*.cpp"]),
     hdrs = glob(["include/Support/Threading/*.h"]),
+    # HWInfo.cpp calls GetAdaptersInfo to enumerate MAC addresses, and that
+    # lives in iphlpapi rather than in the CRT. Declared here rather than at
+    # each final binary so every consumer of this library picks it up.
+    linkopts = select({
+        "@platforms//os:windows": ["-liphlpapi"],
+        "//conditions:default": [],
+    }),
     deps = [
         ":Base",
         "@llvm-project//llvm:Support",

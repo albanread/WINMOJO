@@ -16,9 +16,16 @@
 
 #include "Support/SymbolExport.h"
 
-#ifndef _MSC_VER
+// The guard here used to be #ifndef _MSC_VER around <unistd.h> alone, on the
+// assumption that an MSVC-compatible compiler supplies ssize_t. It does not,
+// and clang defines _MSC_VER when targeting the MSVC ABI, so both the include
+// and the type went missing. SSIZE_T is the Windows spelling of the same type.
+#ifdef _WIN32
+#include <BaseTsd.h>
+using ssize_t = SSIZE_T;
+#else
 #include <unistd.h>
-#endif // _MSC_VER
+#endif
 
 // Set allocators to system memalign/free to support asan
 // this function is NOT thread safe and needs to be called
