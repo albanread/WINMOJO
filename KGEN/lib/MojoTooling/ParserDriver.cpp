@@ -42,6 +42,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/SourceMgr.h"
 
+#include <deque>
 #include <filesystem>
 
 using namespace M;

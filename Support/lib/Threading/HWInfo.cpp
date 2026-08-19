@@ -30,7 +30,6 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <sched.h>
 #include <string>
 #include <system_error>
 #include <tuple>
@@ -65,6 +64,10 @@ using namespace M;
 
 namespace {
 #if HAVE_LINUX_X86_SYSTEM_INFO
+// cpu_set_t, CPU_ISSET and sched_getaffinity. Every use sits inside one of
+// these guards, so the include belongs here rather than with the standard
+// headers, where it broke any platform without sched.h.
+#include <sched.h>
 /// Function is very similar to what linux uses. We will mainly use
 /// this to detect P and E cores on x86.
 static inline void native_cpuid(unsigned int *eax, unsigned int *ebx,

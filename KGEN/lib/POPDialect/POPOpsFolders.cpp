@@ -26,7 +26,6 @@
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
 #include <mlir/IR/Diagnostics.h>
-#include <unistd.h>
 
 using namespace M;
 using namespace KGEN;

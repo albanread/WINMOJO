@@ -74,7 +74,6 @@
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/SplitModule.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
-#include <dlfcn.h>
 #include <fstream>
 #include <string>
 

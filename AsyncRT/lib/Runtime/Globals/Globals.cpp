@@ -38,7 +38,7 @@
 
 using namespace M::AsyncRT;
 
-[[maybe_unused]] MODULAR_CXX_EXPORT std::atomic<ssize_t>
+[[maybe_unused]] MODULAR_CXX_EXPORT std::atomic<std::ptrdiff_t>
     M::AsyncRT::Globals::totalAllocatedAsyncValues{0};
 
 MODULAR_CXX_EXPORT CompactCPUDevicePtr &
