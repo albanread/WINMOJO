@@ -923,3 +923,56 @@ Windows ARM64 uses `__yield()` rather than the `isb` inline assembly the other
 ARM targets use, deliberately: inline assembly stops LLVM computing a function's
 length for SEH unwind info, which is a hard error here rather than a warning.
 The same constraint already forced upb onto its portable path.
+
+## The heap corruption was never Bazel's fault
+
+The stdlib precompile crashed under Bazel with `0xC0000374` (heap corruption)
+and `0xC0000409` (fastfail), while the identical command run by hand appeared
+to succeed. Both halves of that sentence turned out to be misleading, and the
+path to the real bug is worth recording.
+
+**Step one: distrust the sample size.** The "manual run succeeds" claim rested
+on one run. Looping it six times gave six crashes — three `0xC0000374`, three
+`0xC0000409`. There was never a Bazel-specific bug; there was a nondeterministic
+crash and a lucky first roll. The lesson is old but keeps needing to be
+relearned: one clean run of a nondeterministic failure proves nothing.
+
+**Step two: notice *when* it dies.** Every crashing run had already written the
+complete 3.2 MB `std.mojoc`. The compiler does all of its work correctly and
+dies on the way out the door. Crashes at process teardown with completed output
+are the signature of allocator trouble in destructors, not of compiler logic
+bugs.
+
+**Step three: look at the imports.** `llvm-readobj --coff-imports mojo.exe`
+listed no `ucrtbase.dll`, no `api-ms-win-crt-*`, no `vcruntime140.dll` — and
+the same for the Globals DLLs. Clang's default for MSVC targets is the *static*
+CRT, so mojo.exe, MSupportGlobals.dll and AsyncRTRuntimeGlobals.dll each
+carried a private copy of the C runtime, each with its own heap.
+
+That is fatal to this codebase's architecture. Modular builds the Globals
+libraries as shared objects precisely so that one allocator serves the whole
+process — TCMalloc state, runtime globals, the works. On Linux and macOS a
+single libc guarantees it. On Windows with static CRTs, the design inverts:
+every module gets its own allocator, and any `std::string`, `shared_ptr`
+control block or vector allocated in one module and freed in another goes back
+to the wrong heap. The damage is silent until ntdll's heap validation trips,
+which is why the exit code varied and why the crash always landed in teardown,
+where each module's globals drain at once.
+
+Why silent, even with crash reporting compiled in? Two reasons stacked:
+`rules_mojo` sets `MODULAR_CRASH_REPORTING_ENABLED=false` for every compile
+action, and `0xC0000374`/`0xC0000409` are raised via `__fastfail`, which
+bypasses SEH and vectored handlers entirely. Only a debugger or WER sees them.
+
+**The fix is one flag**: `-fms-runtime-lib=dll` in the toolchain's Windows
+compile args. It defines `_MT` and `_DLL`, so the MSVC headers' autolink
+pragmas select `msvcrt.lib`/`ucrt.lib` (the import libraries) instead of
+`libcmt.lib`/`libucrt.lib`, and every module in the process shares the one
+ucrtbase heap — the same topology the code was written against. Verified on a
+scratch object before committing to the rebuild: with the flag the object
+embeds `DEFAULTLIB:msvcrt`, without it `libcmt` territory. This is also simply
+what Windows software does: /MD is the norm for anything shipping an exe with
+DLLs.
+
+The cost: the flag changes every compile command line, so the entire C++ tree
+rebuilds and the disk cache starts cold.

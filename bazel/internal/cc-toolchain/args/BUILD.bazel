@@ -176,6 +176,20 @@ cc_args(
         # being pinned by hand.
         "@platforms//os:windows": [],
         "//conditions:default": ["-fno-autolink"],
+    }) + select({
+        # The dynamic CRT, and this is a correctness requirement, not a
+        # packaging preference. Clang's default for MSVC targets is the static
+        # CRT, which gives mojo.exe and every Globals DLL a private heap. The
+        # Globals DLLs exist precisely so that one allocator serves the whole
+        # process; with per-module heaps, any std::string, shared_ptr control
+        # block or vector that is allocated in one module and released in
+        # another frees into the wrong heap. The damage surfaces as
+        # nondeterministic 0xC0000374/0xC0000409 aborts at process teardown,
+        # after the compiler has already written its output. One shared
+        # ucrtbase heap restores the topology the code was written against: a
+        # single allocator per process, as on Linux and macOS.
+        "@platforms//os:windows": ["-fms-runtime-lib=dll"],
+        "//conditions:default": [],
     }),
 )
 
