@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc/toolchains:args.bzl", "cc_args")
 load("@rules_cc//cc/toolchains:artifacts.bzl", "cc_artifact_name_pattern")
 load("@rules_cc//cc/toolchains:make_variable.bzl", "cc_make_variable")
 load("@rules_cc//cc/toolchains:toolchain.bzl", "cc_toolchain")
@@ -50,8 +51,8 @@ cc_sysroot(
             "//:linux_x86_64": [":linux_sysroot_x86_64"],
             "//:linux_aarch64": [":linux_sysroot_aarch64"],
             "//:windows_arm64": [
-                "@sysroot-windows-arm64//:includes",
-                "@sysroot-windows-arm64//:libs",
+                ":windows_arm64_includes",
+                ":windows_arm64_libs",
             ],
             "@platforms//os:macos": [":macos_sysroot"],
         }) + [
@@ -165,6 +166,73 @@ cc_make_variable(
     name = "macos_stack_frame",
     value = "-Wframe-larger-than=100000000 -Wno-vla",
     variable_name = "STACK_FRAME_UNLIMITED",
+)
+
+# There is no --sysroot for a windows-msvc target, so the MSVC and SDK headers
+# are passed as -isystem. The paths are formatted from directory targets rather
+# than written literally: Bazel rejects absolute paths outside the execution
+# root, and allowlist_include_directories is what permits a system include path
+# to sit outside the sandbox at all.
+cc_args(
+    name = "windows_arm64_includes",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:compile_actions",
+    ],
+    allowlist_include_directories = [
+        "@sysroot-windows-arm64//vc_include:dir",
+        "@sysroot-windows-arm64//sdk_ucrt:dir",
+        "@sysroot-windows-arm64//sdk_shared:dir",
+        "@sysroot-windows-arm64//sdk_um:dir",
+        "@sysroot-windows-arm64//sdk_winrt:dir",
+    ],
+    args = [
+        "-isystem",
+        "{vc_include}",
+        "-isystem",
+        "{sdk_ucrt}",
+        "-isystem",
+        "{sdk_shared}",
+        "-isystem",
+        "{sdk_um}",
+        "-isystem",
+        "{sdk_winrt}",
+    ],
+    data = [
+        "@sysroot-windows-arm64//vc_include:files",
+        "@sysroot-windows-arm64//sdk_ucrt:files",
+        "@sysroot-windows-arm64//sdk_shared:files",
+        "@sysroot-windows-arm64//sdk_um:files",
+        "@sysroot-windows-arm64//sdk_winrt:files",
+    ],
+    format = {
+        "vc_include": "@sysroot-windows-arm64//vc_include:dir",
+        "sdk_ucrt": "@sysroot-windows-arm64//sdk_ucrt:dir",
+        "sdk_shared": "@sysroot-windows-arm64//sdk_shared:dir",
+        "sdk_um": "@sysroot-windows-arm64//sdk_um:dir",
+        "sdk_winrt": "@sysroot-windows-arm64//sdk_winrt:dir",
+    },
+)
+
+cc_args(
+    name = "windows_arm64_libs",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:link_actions",
+    ],
+    args = [
+        "-L{vc_lib}",
+        "-L{sdk_lib_ucrt}",
+        "-L{sdk_lib_um}",
+    ],
+    data = [
+        "@sysroot-windows-arm64//vc_lib:files",
+        "@sysroot-windows-arm64//sdk_lib_ucrt:files",
+        "@sysroot-windows-arm64//sdk_lib_um:files",
+    ],
+    format = {
+        "vc_lib": "@sysroot-windows-arm64//vc_lib:dir",
+        "sdk_lib_ucrt": "@sysroot-windows-arm64//sdk_lib_ucrt:dir",
+        "sdk_lib_um": "@sysroot-windows-arm64//sdk_lib_um:dir",
+    },
 )
 
 cc_artifact_name_pattern(

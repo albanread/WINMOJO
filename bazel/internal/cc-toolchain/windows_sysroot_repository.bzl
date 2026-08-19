@@ -1,56 +1,99 @@
-"""Create a local repository describing the MSVC CRT and Windows SDK.
+"""Create a local repository exposing the MSVC CRT and Windows SDK.
 
-There is no `--sysroot` equivalent for a `*-pc-windows-msvc` target, and
-`.bazelrc` sets `--incompatible_strict_action_env`, so clang cannot discover the
-toolchain from the environment the way it would in a normal developer shell.
-Instead this rule locates the installed Visual Studio and Windows SDK once, at
-repository-fetch time, and bakes the resulting include and library directories
-into `cc_args` targets.
+There is no `--sysroot` equivalent for a `*-pc-windows-msvc` target, so the
+include and library directories have to be passed as ordinary `-isystem` and
+`-L` flags. Bazel rejects absolute paths outside the execution root, so pointing
+those flags straight at `C:\\Program Files\\...` fails with "references a path
+outside of the execution root".
 
-This is deliberately non-hermetic: it points at whatever MSVC and SDK are
-installed on the machine. Microsoft's licensing does not permit redistributing
-the CRT headers and import libraries the way the Linux sysroots are
-redistributed, so a hermetic Windows sysroot would have to be assembled locally
-anyway.
+This rule therefore brings the toolchain directories inside the execution root
+so they can be exposed as `directory` targets, the same shape
+`macos_sysroot_repository` produces for the Xcode SDK.
+
+Unlike the macOS rule it **copies** rather than symlinks. Bazel's `glob` does not
+follow symlinked directories on Windows, so a symlinked tree globs to nothing:
+the `directory` target then collapses to the repository root, no headers are
+declared as action inputs, and the compile fails with "absolute path
+inclusion(s) found". Copying costs a slower first fetch and a few hundred MB,
+which is the price of the headers actually being visible to Bazel.
+
+The result is deliberately non-hermetic in *content* — it mirrors whatever MSVC
+and SDK are installed — because Microsoft's licence does not allow
+redistributing the CRT headers and import libraries the way the Linux sysroots
+are redistributed. It is hermetic in *shape*, which is what Bazel requires.
 """
 
-_BUILD_HEADER = """\
-load("@rules_cc//cc/toolchains:args.bzl", "cc_args")
+_EMPTY_SUBPACKAGE_BUILD = """\
+load("@bazel_skylib//rules/directory:directory.bzl", "directory")
 
 package(default_visibility = ["//visibility:public"])
-"""
 
-_EMPTY_BUILD = _BUILD_HEADER + """
-# Not a Windows host: expose empty args so analysis still succeeds elsewhere.
-cc_args(
-    name = "includes",
-    args = [],
+# Not a Windows host. Empty targets keep analysis working elsewhere.
+directory(
+    name = "dir",
+    srcs = [],
 )
 
-cc_args(
-    name = "libs",
-    args = [],
+filegroup(
+    name = "files",
+    srcs = [],
 )
 """
+
+# bazel_skylib's `directory` reports the path of the *package* it is declared
+# in, not the common root of its srcs. Declaring them all in the repository root
+# therefore collapses every one to the repository root, which silently produces
+# five identical -isystem flags. Each directory needs its own package, so a
+# BUILD file is written inside each copied tree.
+_SUBPACKAGE_BUILD = """\
+load("@bazel_skylib//rules/directory:directory.bzl", "directory")
+
+package(default_visibility = ["//visibility:public"])
+
+directory(
+    name = "dir",
+    srcs = glob(["**"], exclude = ["BUILD.bazel"], allow_empty = True),
+)
+
+filegroup(
+    name = "files",
+    srcs = glob(["**"], exclude = ["BUILD.bazel"], allow_empty = True),
+)
+"""
+
+# name -> (kind, subpath under the located root)
+# 'vc' entries resolve against the MSVC tools directory, 'sdk' against the
+# Windows Kits root.
+_INCLUDE_DIRS = [
+    ("vc_include", "vc", "include"),
+    ("sdk_ucrt", "sdk", "Include/{sdk_version}/ucrt"),
+    ("sdk_shared", "sdk", "Include/{sdk_version}/shared"),
+    ("sdk_um", "sdk", "Include/{sdk_version}/um"),
+    ("sdk_winrt", "sdk", "Include/{sdk_version}/winrt"),
+]
+
+_LIB_DIRS = [
+    ("vc_lib", "vc", "lib/{arch}"),
+    ("sdk_lib_ucrt", "sdk", "Lib/{sdk_version}/ucrt/{arch}"),
+    ("sdk_lib_um", "sdk", "Lib/{sdk_version}/um/{arch}"),
+]
 
 def _norm(path):
-    return str(path).replace("\\\\", "/").replace("\\", "/")
+    return str(path).replace("\\", "/")
 
 def _find_visual_studio(rctx):
-    """Return (vc_tools_dir, msvc_version) for the newest MSVC install."""
+    """Return the newest MSVC tools directory, e.g. .../VC/Tools/MSVC/14.51.36231."""
     program_files = rctx.getenv("ProgramFiles", "C:/Program Files")
     program_files_x86 = rctx.getenv("ProgramFiles(x86)", "C:/Program Files (x86)")
 
-    vswhere = rctx.path(_norm(program_files_x86) + "/Microsoft Visual Studio/Installer/vswhere.exe")
     roots = []
+    vswhere = rctx.path(_norm(program_files_x86) + "/Microsoft Visual Studio/Installer/vswhere.exe")
     if vswhere.exists:
         result = rctx.execute([
             str(vswhere),
             "-latest",
             "-products",
             "*",
-            "-requires",
-            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
             "-property",
             "installationPath",
         ])
@@ -58,8 +101,7 @@ def _find_visual_studio(rctx):
             roots.append(_norm(result.stdout.strip()))
 
     if not roots:
-        # vswhere is not always present; fall back to scanning the well-known
-        # layout, newest edition first.
+        # vswhere is not always installed; fall back to the standard layout.
         base = rctx.path(_norm(program_files) + "/Microsoft Visual Studio")
         if base.exists:
             for version_dir in base.readdir(watch = "no"):
@@ -70,14 +112,14 @@ def _find_visual_studio(rctx):
         tools = rctx.path(root + "/VC/Tools/MSVC")
         if not tools.exists:
             continue
-        versions = sorted([child.basename for child in tools.readdir(watch = "no")], reverse = True)
+        versions = sorted([c.basename for c in tools.readdir(watch = "no")], reverse = True)
         if versions:
-            return root + "/VC/Tools/MSVC/" + versions[0], versions[0]
+            return root + "/VC/Tools/MSVC/" + versions[0]
 
-    return None, None
+    return None
 
 def _find_windows_sdk(rctx):
-    """Return (sdk_root, sdk_version) for the newest installed Windows 10/11 SDK."""
+    """Return (sdk_root, sdk_version) for the newest installed Windows SDK."""
     program_files_x86 = rctx.getenv("ProgramFiles(x86)", "C:/Program Files (x86)")
     root = _norm(program_files_x86) + "/Windows Kits/10"
     include = rctx.path(root + "/Include")
@@ -95,80 +137,60 @@ def _find_windows_sdk(rctx):
     return root, sorted(versions, reverse = True)[0]
 
 def _windows_sysroot_repository_impl(rctx):
+    all_names = [entry[0] for entry in _INCLUDE_DIRS + _LIB_DIRS]
+
+    rctx.file("BUILD.bazel", "# Intentionally empty; each directory is its own package.\n")
+
     if not rctx.os.name.startswith("windows"):
-        rctx.file("BUILD.bazel", _EMPTY_BUILD)
+        for name in all_names:
+            rctx.file(name + "/BUILD.bazel", _EMPTY_SUBPACKAGE_BUILD)
         return
 
-    vc_dir, msvc_version = _find_visual_studio(rctx)
+    vc_dir = _find_visual_studio(rctx)
     if not vc_dir:
         fail("Could not locate an MSVC installation. Install the Visual Studio " +
              "'Desktop development with C++' workload, including the ARM64 build tools.")
 
     sdk_root, sdk_version = _find_windows_sdk(rctx)
     if not sdk_root:
-        fail("Could not locate a Windows 10/11 SDK under '{}/Windows Kits/10'.".format(
-            rctx.getenv("ProgramFiles(x86)", "C:/Program Files (x86)"),
-        ))
+        fail("Could not locate a Windows 10/11 SDK under " +
+             "'{}/Windows Kits/10'.".format(rctx.getenv("ProgramFiles(x86)", "C:/Program Files (x86)")))
 
     arch = rctx.attr.target_arch
+    roots = {"vc": vc_dir, "sdk": sdk_root}
 
-    includes = [
-        vc_dir + "/include",
-        "{}/Include/{}/ucrt".format(sdk_root, sdk_version),
-        "{}/Include/{}/shared".format(sdk_root, sdk_version),
-        "{}/Include/{}/um".format(sdk_root, sdk_version),
-        "{}/Include/{}/winrt".format(sdk_root, sdk_version),
-    ]
+    for name, kind, template in _INCLUDE_DIRS + _LIB_DIRS:
+        subpath = template.format(sdk_version = sdk_version, arch = arch)
+        source = roots[kind] + "/" + subpath
+        if not rctx.path(source).exists:
+            fail("Expected toolchain directory does not exist: {}\n".format(source) +
+                 "The MSVC '{}' build tools or the matching SDK components may not be installed.".format(arch))
 
-    libs = [
-        "{}/lib/{}".format(vc_dir, arch),
-        "{}/Lib/{}/ucrt/{}".format(sdk_root, sdk_version, arch),
-        "{}/Lib/{}/um/{}".format(sdk_root, sdk_version, arch),
-    ]
+        # robocopy /E mirrors the tree. Its exit codes are a bitmask where
+        # anything below 8 means success (1 = files copied, 2 = extra files,
+        # 4 = mismatches); 8 and above are genuine failures. Treating it like a
+        # normal command and checking for zero would fail every time.
+        result = rctx.execute([
+            "robocopy",
+            source.replace("/", "\\"),
+            str(rctx.path(name)).replace("/", "\\"),
+            "/E",
+            "/NFL",
+            "/NDL",
+            "/NJH",
+            "/NJS",
+            "/NP",
+            "/R:1",
+            "/W:1",
+        ])
+        if result.return_code >= 8:
+            fail("Failed copying {} into the sysroot repository (robocopy exit {}):\n{}".format(
+                source,
+                result.return_code,
+                result.stdout + result.stderr,
+            ))
 
-    for path in includes + libs:
-        if not rctx.path(path).exists:
-            fail("Expected toolchain directory does not exist: {}\n".format(path) +
-                 "The MSVC '{}' build tools and the matching SDK components may not be installed.".format(arch))
-
-    include_args = []
-    for path in includes:
-        # -isystem, not -imsvc: the latter is a clang-cl flag and the clang
-        # driver rejects it outright with "unknown argument". Both mark the
-        # directory as containing system headers so warnings there stay quiet,
-        # which matters because the toolchain compiles with -Wall -Wextra
-        # -pedantic and several -Werror= flags.
-        include_args.append("-isystem")
-        include_args.append(path)
-
-    lib_args = ["-L" + path for path in libs]
-
-    rctx.file("BUILD.bazel", _BUILD_HEADER + """
-# MSVC {msvc_version}, Windows SDK {sdk_version}, target {arch}.
-# Generated by windows_sysroot_repository; do not edit.
-
-cc_args(
-    name = "includes",
-    actions = [
-        "@rules_cc//cc/toolchains/actions:compile_actions",
-    ],
-    args = {include_args},
-)
-
-cc_args(
-    name = "libs",
-    actions = [
-        "@rules_cc//cc/toolchains/actions:link_actions",
-    ],
-    args = {lib_args},
-)
-""".format(
-        msvc_version = msvc_version,
-        sdk_version = sdk_version,
-        arch = arch,
-        include_args = repr(include_args),
-        lib_args = repr(lib_args),
-    ))
+        rctx.file(name + "/BUILD.bazel", _SUBPACKAGE_BUILD)
 
 windows_sysroot_repository = repository_rule(
     implementation = _windows_sysroot_repository_impl,

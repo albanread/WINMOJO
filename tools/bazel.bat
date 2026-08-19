@@ -79,6 +79,7 @@ REM overridden by them.
   echo build --build_metadata=TAG_TARGET_OS=windows
   echo build --spawn_strategy=remote,worker,standalone
   echo build --strategy=TestRunner=remote,worker,standalone
+  echo build --experimental_output_paths=off
   echo import %%workspace%%/build/local-resources.bazelrc
 )
 

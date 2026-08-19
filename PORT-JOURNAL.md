@@ -548,6 +548,61 @@ With that fixed, analysis moves past all the pip machinery and into the C++
 toolchain proper, where the remaining failures are ordinary missing-Windows
 branches in `select()`s.
 
+### G3 reached: Bazel builds and runs a native Windows ARM64 binary
+
+```
+$ bazel build --config=build-mojo -c fastbuild //bazel/internal/cc-toolchain/smoke
+INFO: Build completed successfully, 5 total actions
+
+$ ./bazel-bin/.../smoke.exe
+winmojo smoke ok: windows-arm64-clang
+pointer width: 64 bits
+```
+
+`dumpbin` reports `AA64 machine (ARM64)`, Windows CUI. No manual flags: plain
+`bazel build`. The whole chain now works — bazelisk, Bazel, the module graph,
+the pip and python plumbing, the hermetic clang, the MSVC sysroot, compile and
+link.
+
+Five further problems were solved to get here.
+
+1. **Path mapping requires sandboxing.** `--experimental_output_paths=strip`
+   makes CppCompile "require sandboxing due to path mapping", which Windows
+   cannot provide. Disabled via the wrapper.
+
+2. **Symlinked sysroots glob to nothing on Windows.** The first attempt mirrored
+   `macos_sysroot_repository` and symlinked the MSVC and SDK trees in. The
+   symlinks were created and were traversable from a shell, but Bazel's `glob`
+   does not follow symlinked directories on Windows, so every `directory` target
+   had empty srcs. The rule now **copies** instead — about 1.6 GB, a slower
+   first fetch, and the price of Bazel actually seeing the headers.
+
+3. **`directory` reports its package path, not its srcs' root.** With all eight
+   targets declared in the repository root BUILD file, every one resolved to the
+   repository root, so the toolchain silently emitted five identical `-isystem`
+   flags pointing at the same place. That is why the macOS rule puts its
+   `directory` inside `sysroot/BUILD.bazel`. Each copied tree now gets its own
+   BUILD file and is referenced as `@sysroot-windows-arm64//<name>:dir`.
+
+4. **`-D_DEBUG` means something else on MSVC.** `args/modular:assertions` pairs
+   it with `-D_GLIBCXX_ASSERTIONS`, which is a libstdc++ idiom. On MSVC `_DEBUG`
+   switches the entire CRT to its debug variant, so the STL emitted calls to
+   `_CrtDbgReport` and the link failed on it. Windows keeps `-UNDEBUG`, which is
+   the actual intent — `assert()` stays live outside production builds.
+
+5. Shell actions need `BAZEL_SH`, since the builtin module map generator is a
+   bash script.
+
+The lesson repeated throughout: three of these produced misleading errors a long
+way from their cause. Symlinked globs surfaced as "absolute path inclusion(s)
+found"; the `directory` path bug surfaced as the same thing; `_DEBUG` surfaced as
+an undefined symbol in `<vector>`. Dumping the actual command line with
+`--subcommands` found two of them immediately after flag-level guessing had
+failed.
+
+**Next: G4** — point this at KGEN and build the compiler itself. The toolchain is
+proven on one translation unit; KGEN is 326 `.cpp` files plus LLVM.
+
 ### Repository state
 
 The fork now has a real remote: `origin` =

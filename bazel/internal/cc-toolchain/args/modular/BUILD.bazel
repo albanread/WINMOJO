@@ -133,6 +133,15 @@ cc_args(
             "-Wno-unused-function",
             "-Wno-unused-variable",
         ],
+        # _DEBUG and _GLIBCXX_ASSERTIONS are a libstdc++ pairing, and on MSVC
+        # _DEBUG does something quite different: it switches the whole CRT to
+        # the debug variant, so the STL emits calls to _CrtDbgReport and the
+        # link then needs the debug CRT import libraries to match. Keeping
+        # -UNDEBUG preserves the actual intent here, which is that assert()
+        # stays live outside production builds.
+        "//:windows_arm64": [
+            "-UNDEBUG",
+        ],
         "//conditions:default": [
             "-D_DEBUG",
             "-D_GLIBCXX_ASSERTIONS",
