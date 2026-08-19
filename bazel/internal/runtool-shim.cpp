@@ -18,6 +18,20 @@
 #include <sstream>
 #include <string_view>
 
+// Windows has no setenv. _putenv_s is the equivalent, but it always overwrites,
+// so the overwrite=false case has to be emulated with an explicit lookup. That
+// is not atomic, which is fine here: this runs from a constructor before main,
+// long before any other thread exists.
+static void setEnvVar(const char *key, const char *value, bool overwrite) {
+#ifdef _WIN32
+  if (!overwrite && std::getenv(key) != nullptr)
+    return;
+  _putenv_s(key, value);
+#else
+  setenv(key, value, overwrite ? 1 : 0);
+#endif
+}
+
 static std::string_view getRequiredEnv(const char *key) {
   char *value = std::getenv(key);
   if (!value) {
@@ -53,7 +67,7 @@ static void makeImportPathsAbsolute() {
     }
   }
 
-  setenv("MODULAR_MOJO_MAX_IMPORT_PATH", result.c_str(), 1);
+  setEnvVar("MODULAR_MOJO_MAX_IMPORT_PATH", result.c_str(), true);
 }
 
 __attribute__((visibility("default"))) __attribute__((constructor)) void
@@ -69,7 +83,7 @@ fix_bazel_paths() {
   std::filesystem::path derivedDir = workspaceDir / ".derived";
 
   // Find modular.cfg in derived for runtime dependencies
-  setenv("MODULAR_HOME", derivedDir.generic_string().c_str(), 0);
+  setEnvVar("MODULAR_HOME", derivedDir.generic_string().c_str(), false);
   auto pwd = std::filesystem::current_path();
   if (pwd.filename() == "_main") {
     // Convert import paths to absolute before changing directories, since they
