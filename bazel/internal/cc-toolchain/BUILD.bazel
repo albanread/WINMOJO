@@ -156,6 +156,16 @@ cc_sysroot(
         }),
         module_map = "//bazel/internal/cc-toolchain/tools:builtin_module_map",
         supports_header_parsing = True,
+        # This attribute, not the linker_param_file feature, is what actually
+        # makes Bazel spill link arguments to a params file. It defaults to
+        # False, which is harmless where a command line can be megabytes long,
+        # but on Windows CreateProcess refuses past 32767 characters and the
+        # failure is a bare exit -1 with no diagnostic. protoc links with 665
+        # arguments of long output paths and never had a chance.
+        supports_param_files = select({
+            "@platforms//os:windows": True,
+            "//conditions:default": False,
+        }),
         tags = [TOP_LEVEL_TAG],  # Used below, unclear why this is needed
         tool_map = "//bazel/internal/cc-toolchain/tools:{}_tools".format(platform),
     )
