@@ -455,6 +455,11 @@ _UTIL_POSIX_ONLY_SRCS = [
     "util/posix/spawn_subprocess.cc",
     "util/synchronization/semaphore_posix.cc",
     "util/thread/thread_posix.cc",
+    # Not named _posix, but util/BUILD.gn keeps it inside the
+    # `crashpad_is_linux || crashpad_is_android` block and it includes
+    # <unistd.h>, so it is Linux-only despite being listed as multiplatform
+    # here.
+    "util/process/process_memory_sanitized.cc",
 ]
 
 # From util/BUILD.gn's `if (crashpad_is_win)` block. Note util/misc/time.cc stays
@@ -520,6 +525,13 @@ cc_library(
     ],
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
+        # Carries CRASHPAD_FLOCK_ALWAYS_SUPPORTED=1 and the mini_chromium
+        # buildflag values, and propagates them to dependents. Upstream computes
+        # the flock flag as !(android || fuchsia), so it is true on Windows.
+        # Without it the !CRASHPAD_FLOCK_ALWAYS_SUPPORTED branches of
+        # client/settings.cc compile, and those concatenate a narrow literal
+        # onto FilePath::StringType, which is std::wstring on Windows.
+        ":backtrace_common",
         ":compat",
         ":mini_chromium",
         ":zlib",
@@ -635,6 +647,14 @@ cc_library(
     ],
     hdrs = glob(["client/**/*.h"]),
     copts = [
+        # C++17, matching crashpad's own /std:c++17, rather than the C++20 the
+        # toolchain otherwise applies. On Windows FilePath::StringType is
+        # std::wstring and crashpad streams it through its LOG() macros, but
+        # C++20 deleted operator<<(basic_ostream<char>&, const wchar_t*)
+        # (P1423), so those become "overload resolution selected deleted
+        # operator". This does not arise on Linux or macOS, where StringType is
+        # a narrow std::string.
+        "-std=c++17",
         "-Wno-microsoft-anon-tag",
     ],
     defines = _WIN_DEFINES,

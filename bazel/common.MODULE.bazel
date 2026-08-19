@@ -151,6 +151,19 @@ single_version_override(
 # protoc-gen-validate copies grpc's Python block verbatim, so it needs the same
 # treatment for the same reason: no aarch64-pc-windows-msvc runtime exists below
 # 3.11, and its pgv_pip_deps hub cannot resolve a 3.9 interpreter.
+# zlib-ng's Windows copts are MSVC /wd#### warning numbers, which only clang-cl
+# understands. This port drives the ordinary clang driver against the MSVC ABI,
+# where a leading slash is read as a file path, so every zlib-ng translation
+# unit fails with "no such file or directory: '/wd4244'".
+single_version_override(
+    module_name = "zlib-ng",
+    patch_strip = 1,
+    patches = [
+        "//bazel/public-patches:zlib-ng-clang-driver-flags.patch",
+    ],
+    version = "2.3.3",
+)
+
 single_version_override(
     module_name = "protoc-gen-validate",
     patch_strip = 1,
