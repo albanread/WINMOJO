@@ -1229,3 +1229,59 @@ Also observed in passing: with crash reporting enabled, every mojo
 invocation now warns "unable to locate crashpad handler executable" — the
 client half of crashpad is ported, the handler binary is not. It moves up
 the queue.
+
+## Making the build survivable
+
+Three findings turned a multi-hour build into roughly seventy minutes, and
+all three were Windows-specific defaults nobody upstream had reason to
+question.
+
+**Every test was zipping CPython.** Each lit suite and each mojo test is a
+`py_test` underneath, and `py_test` needs its runfiles. On Linux those are a
+symlink tree and cost nothing; Windows Bazel assumes symlinks are
+unavailable and instead packs the entire runfiles closure into a
+self-extracting zip per target — measured here at 122 MB and 2,540 files,
+including the hermetic CPython and its OpenSSL .pdb files, taking about two
+minutes each across roughly two hundred targets. This machine has Developer
+Mode enabled, so symlinks work: `--nobuild_python_zip --enable_runfiles`
+deleted the whole category and took the action graph from 11,770 to ~3,500
+for the same test set.
+
+**Defender was scanning every object file.** Real-time protection with no
+exclusion covering the Bazel output base — where every .obj, .lib and .pdb
+is written. Excluding `C:\projects` alone is not enough and is the natural
+mistake: essentially all build I/O happens under `_bazel_alban`. With
+exclusions in place the build sustains ~160 actions/min on 8 cores, about
+3 s/action for -O3 LLVM sources.
+
+**Debug mode for everyone.** Upstream's .bazelrc sets
+`--compilation_mode=dbg`, so a developer's default build is a debug LLVM
+inside mojo.exe. That is 5-10x slower to produce, slower to run, and it
+enables LLVM's own assertions in the JIT — one of which
+(TargetSchedule.cpp:227, "incomplete machine model") was aborting the
+compiler during tests and masquerading as a port bug. A `local.bazelrc` now
+pins `--compilation_mode=opt`.
+
+Also worth recording: first-party C++ compiles with `-g -O3` under
+`modular_config=default`, so all of KGEN/Support/AsyncRT carries full
+CodeView debug info even in release. `modular_config=release` uses
+`-gline-tables-only`, which still symbolizes a crash stack — the thing we
+actually want — at a fraction of the cost. Not switched yet because it
+re-keys every first-party action.
+
+### Never build LLVM again
+
+The remaining bulk is LLVM itself: roughly 8,000 of 11,700 actions. A stock
+prebuilt cannot substitute, because Modular patches LLVM's own headers —
+`MachineFunction.h` changes a member from reference to pointer, an ABI
+change that makes any object compiled against unpatched headers
+incompatible. But the *output* is small: the built tree is 5 GB, 336 static
+libraries and 912 generated .inc headers. Packaging that as a versioned
+archive consumed through a repository rule turns those 8,000 compile actions
+into an extract, and unlike the disk cache it is immune to toolchain flag
+changes re-keying everything. That is the next structural piece of work.
+
+Until then the protections are: the disk cache (re-enabled at
+C:/bazel-cache/winmojo, 60 GB cap, now that the configuration has stopped
+moving) and the discipline of never running `bazel clean` — the output base
+is currently the only copy of work that costs an hour to reproduce.
