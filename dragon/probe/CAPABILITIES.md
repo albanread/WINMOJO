@@ -9,8 +9,10 @@ and the second is the one that matters.
 | **Adreno GPU** via our OpenCL | ✅ | ✅ | saxpy 4096 elems exact; matmul 41.9 GFLOP/s exact |
 | **Adreno GPU** via `QnnGpu` | ✅ | ✅ | `qnn-platform-validator --backend gpu`: **Unit Test Passed** |
 | **Hexagon NPU** via `QnnHtp` | ✅ | ✅ | `qnn-platform-validator --backend dsp`: **Unit Test Passed** |
-| **Oryon CPU** via `QnnCpu` | ✅ | — | provider negotiates; no separate unit test in the tool |
-| Full model graph, any backend | — | ❌ | blocked, see below |
+| **Oryon CPU** via `QnnCpu` | ✅ | ✅ | full graph via `qnn-net-run`, outputs written |
+| **Full model graph** on CPU | ✅ | ✅ | InceptionV3-shaped, 298 ms, 2 result sets |
+| **Full model graph** on **HTP** | ✅ | ✅ | same graph, 1377 ms incl. prepare, 2 result sets |
+| **Full model graph** on `QnnGpu` | ✅ | ❌ | `CL_INVALID_OPERATION` in the recording queue |
 
 ## Reproducing
 
@@ -64,27 +66,71 @@ Two oddities recorded, not explained:
 - `DSP_INFO UNSUPPORTED_KEY: 49` / `50` appear before the run and appear to be
   harmless.
 
-## Blocked: full model graph
+## Full model graph — CPU and NPU work, GPU does not
 
-`qnn-net-run` needs a compiled model library. Building one from the SDK's own
-example (`examples/QNN/converter/models/qnn_model_float.cpp`) fails, and the
-reason is a toolchain gap, not anything about our machine's silicon:
+Built the SDK's own example model (`examples/QNN/converter/models/qnn_model_float.cpp`,
+an InceptionV3 conv+relu graph) into an ARM64 DLL and ran it through
+`qnn-net-run` on each backend.
 
-1. `qnn-model-lib-generator` hardcodes `cmake -T ClangCL`, and this Visual
-   Studio 18 install has no ClangCL component → `MSB8020`.
-2. Forcing the default MSVC toolset gets past configure, then fails to compile:
-   the generated code uses `(Qnn_Tensor_t){...}` — a **C compound literal**,
-   which is a Clang/GCC extension and not valid ISO C++ at any standard level.
-   `/std:c++20` clears the designated-initializer error (`C7555`) but not this
-   one (`C4576`, `C2059`).
-3. No clang exists anywhere on this box.
+| Backend | Result | Wall time |
+|---|---|---|
+| `QnnCpu` | **Finished Executing Graphs**, 2 result sets written | 298 ms |
+| `QnnHtp` | **Finished Executing Graphs**, 2 result sets written | 1377 ms (incl. prepare) |
+| `QnnGpu` | **Graph Execution failure** | 313 ms |
 
-**So Qualcomm's generated model code requires Clang. There is no MSVC-only
-path.** Fix is one of:
+The GPU failure is specific:
 
-- Visual Studio Installer → *Desktop development with C++* → **C++ Clang tools
-  for Windows** (adds the ClangCL toolset the generator expects), or
-- install LLVM for ARM64 and point CMake at `clang-cl`.
+```
+CL ERROR: (-59) CL_INVALID_OPERATION
+GPU ERROR: GPU_ERROR_OPENCL(10014) - OpenCL recorable command queue error
+```
 
-Either is a user action — it installs software and changes system state.
-Everything else on this page already works without it.
+That is the `clNewRecordingQCOM` / `clEnqueueRecordingQCOM` path the validator
+reported resolving. **`QnnGpu` drives the Adreno through OpenCL command
+record-and-replay, and that path is broken on this driver.** Note what it is
+*not*: the Adreno itself is fine. Our own direct OpenCL dispatch runs saxpy and
+matmul correctly at 41.9 GFLOP/s, and `QnnGpu`'s own vector-add unit test
+passes. Only the recorded-queue path fails, and only on a real graph.
+
+### The documented workaround does not exist in this build
+
+`QnnGpuGraph.h` declares `uint8_t disableQueueRecording` as a graph custom
+config, defaulting to 0. Reaching it through `qnn-net-run` fails in a way worth
+recording, because the two layers contradict each other:
+
+- Put `disable_queue_recording` at the top level of the GPU extension config →
+  schema rejects it, saying it depends on `graph_names`.
+- Move it beside `"graph_names": ["convReluModel"]` as instructed →
+  `ERROR: Unsupported key: graphs/0/disable_queue_recording`.
+
+So the JSON schema validates a key that `QnnGpuNetRunExtensions.dll` then
+refuses. **The toggle is only reachable programmatically**, by a host that sets
+`QnnGpuGraph_CustomConfig_t` through the API — which is work DragonMax will be
+doing anyway, but is not available from the stock tool.
+
+**Consequence for the design: do not build the GPU path on `QnnGpu`.** Our own
+OpenCL dispatch already works and is measurably fast; QnnGpu's graph path is
+broken here and its escape hatch is unreachable from tooling. The NPU is the
+backend where QNN earns its place.
+
+## Building a model library — the working recipe
+
+`dragon/qnn/build_model_lib.ps1` automates all of this. Four separate traps had
+to be cleared, none of which produces an honest error:
+
+1. `qnn-model-lib-generator` hardcodes `cmake -T ClangCL`; a stock VS 18 has no
+   ClangCL component → `MSB8020`.
+2. The generated code uses `(Qnn_Tensor_t){...}` — a **C compound literal**, a
+   Clang extension invalid in ISO C++ at any level. `/std:c++20` clears the
+   designated-initializer error (`C7555`) but never `C4576`/`C2059`. **Clang is
+   mandatory; there is no MSVC-only path.** WINMOJO's bazel toolchain already
+   provides clang 22.1.4 targeting `aarch64-pc-windows-msvc`.
+3. The generated `CMakeLists.txt` branches on `CMAKE_GENERATOR_PLATFORM`, which
+   Ninja refuses to accept. Branch on which `obj/` directory exists instead.
+4. `set VAR=value && next` in cmd captures the space before `&&`. That turned
+   `QNN_SDK_ROOT` into `...251225 `, the include path into `...251225 \include\QNN`,
+   and surfaced as `fatal error: 'QnnInterface.h' file not found` — a quoting
+   bug wearing a missing-header costume. Use `set "VAR=value"`.
+
+Also: the generator writes its staging tree to `tmp_<pid>` in the **current
+working directory**, not the `-o` directory, and leaves it behind.

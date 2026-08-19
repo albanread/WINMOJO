@@ -538,3 +538,81 @@ behind. Two of them landed in `C:\projects`; both removed.
 Once clang is available: build the example model and run `qnn-net-run` across
 `QnnCpu` / `QnnGpu` / `QnnHtp` for a like-for-like three-way comparison, then
 W4.0 — the HTP model-size ceiling.
+
+---
+
+## 2026-08-19 — full model graph runs on CPU and NPU; QnnGpu does not
+
+Clang was already on the box after all — WINMOJO's bazel toolchain downloads
+**clang 22.1.4, target `aarch64-pc-windows-msvc`**, under
+`_bazel_alban\cache\repos\...\bin`. My earlier search missed it because I looked
+at install locations and PATH rather than the bazel repo cache. It is not
+registered anywhere, so `Get-Command` and the registry both come up empty.
+
+With that, built the SDK's own InceptionV3 conv+relu example into an ARM64 DLL
+and ran it through `qnn-net-run` on each backend:
+
+| Backend | Result | Wall time |
+|---|---|---|
+| `QnnCpu` | **Finished Executing Graphs**, 2 result sets | 298 ms |
+| `QnnHtp` | **Finished Executing Graphs**, 2 result sets | 1377 ms (incl. prepare) |
+| `QnnGpu` | **Graph Execution failure** | 313 ms |
+
+**A real graph executes on the Hexagon NPU.** That is the headline; the NPU line
+is unblocked.
+
+### QnnGpu is broken here, and it matters for the design
+
+```
+CL ERROR: (-59) CL_INVALID_OPERATION
+GPU ERROR: GPU_ERROR_OPENCL(10014) - OpenCL recorable command queue error
+```
+
+That is the `clNewRecordingQCOM` / `clEnqueueRecordingQCOM` path the platform
+validator reported resolving earlier. QnnGpu drives the Adreno through OpenCL
+command record-and-replay, and **that path fails on this driver.**
+
+Careful about what this is not. The Adreno is fine: our own direct OpenCL
+dispatch runs saxpy and a tiled matmul correctly at 41.9 GFLOP/s, and QnnGpu's
+own vector-add unit test passes. Only the recorded-queue path fails, and only
+on a real graph. The unit test passing while the real workload fails is exactly
+why "loads" and "executes" are tracked as separate columns.
+
+The header offers a way out — `QnnGpuGraph.h` declares
+`uint8_t disableQueueRecording` — but it is unreachable from the tool, and the
+two layers contradict each other while saying so:
+
+- top-level `disable_queue_recording` → schema rejects it, "depends on graph_names"
+- moved beside `"graph_names": ["convReluModel"]` →
+  `ERROR: Unsupported key: graphs/0/disable_queue_recording`
+
+The JSON schema validates a key the extension DLL then refuses. **The toggle is
+only reachable programmatically**, via `QnnGpuGraph_CustomConfig_t`.
+
+**Design consequence: do not build the GPU path on QnnGpu.** Own the OpenCL
+dispatch. QNN earns its place on the NPU, not the GPU. That reverses the
+optimistic reading from the morning — one API spanning all three is *available*
+but not *usable* for the GPU, and D2's 41.9 GFLOP/s is the reason we can say so
+with numbers rather than shrugging.
+
+### Four traps in building a model library
+
+Recorded in `dragon/qnn/build_model_lib.ps1`, which automates the lot. None of
+them produces an honest error:
+
+1. `qnn-model-lib-generator` hardcodes `cmake -T ClangCL`; stock VS 18 has no
+   ClangCL component → `MSB8020`.
+2. Generated code uses `(Qnn_Tensor_t){...}`, a **C compound literal** — Clang
+   extension, invalid ISO C++ at any level. `/std:c++20` clears `C7555` but
+   never `C4576`/`C2059`. Clang is mandatory.
+3. The generated `CMakeLists.txt` branches on `CMAKE_GENERATOR_PLATFORM`, which
+   Ninja refuses. Branch on which `obj/` dir exists instead.
+4. **`set VAR=value && next` in cmd captures the space before `&&`.**
+   `QNN_SDK_ROOT` became `...251225 `, the include path `...251225 \include\QNN`,
+   and it surfaced as `fatal error: 'QnnInterface.h' file not found` — a quoting
+   bug dressed as a missing header. Use `set "VAR=value"`.
+
+### Next
+
+W4.0, now genuinely unblocked: find the HTP's real model-size ceiling. Then a
+like-for-like CPU-vs-HTP comparison on something bigger than a two-op graph.
