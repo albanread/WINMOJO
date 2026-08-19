@@ -27,9 +27,32 @@ namespace {
 
 /// True if `path`'s filename has a shared-library extension recognized by
 /// `dlopen()`: `.so`, `.dylib`, or a versioned suffix like `libfoo.so.1`.
+/// On Windows the loadable file is the `.dll`, and `.lib` counts too: PE
+/// splits a shared library in two, and the link-time half is what callers
+/// naturally have on hand (see `resolveLoadablePath`).
 bool hasSharedLibraryExtension(StringRef path) {
+#if defined(_WIN32)
+  return path.ends_with_insensitive(".dll") ||
+         path.ends_with_insensitive(".lib");
+#else
   return path.ends_with(".so") || path.ends_with(".dylib") ||
          path.contains(".so.");
+#endif
+}
+
+/// The file the loader can actually open. On Windows an import library names
+/// the same shared library as its `.dll` sibling but cannot itself be loaded,
+/// so translate; everywhere else the path is already loadable.
+std::string resolveLoadablePath(StringRef path) {
+#if defined(_WIN32)
+  if (path.ends_with_insensitive(".lib")) {
+    std::string dll = (path.drop_back(4) + ".dll").str();
+    std::error_code ec;
+    if (std::filesystem::exists(dll, ec) && !ec)
+      return dll;
+  }
+#endif
+  return path.str();
 }
 
 /// Search `searchDirs` for a shared library named `libName`, trying each
@@ -38,7 +61,9 @@ bool hasSharedLibraryExtension(StringRef path) {
 std::optional<std::string> findLibraryByName(StringRef libName,
                                              ArrayRef<std::string> searchDirs) {
   static constexpr StringLiteral kExtensions[] = {
-#if defined(__APPLE__)
+#if defined(_WIN32)
+      ".dll",
+#elif defined(__APPLE__)
       ".dylib",
       ".so",
 #else
@@ -49,10 +74,14 @@ std::optional<std::string> findLibraryByName(StringRef libName,
   std::error_code ec;
   for (StringRef dir : searchDirs) {
     for (StringRef ext : kExtensions) {
-      auto candidate = std::filesystem::path(dir.str()) /
-                       ("lib" + libName.str() + ext.str());
-      if (std::filesystem::exists(candidate, ec) && !ec)
-        return candidate.string();
+      // Windows shared libraries carry no "lib" prefix, so try the bare name
+      // first and the prefixed spelling second for libraries that do use it.
+      for (std::string stem :
+           {libName.str() + ext.str(), "lib" + libName.str() + ext.str()}) {
+        auto candidate = std::filesystem::path(dir.str()) / stem;
+        if (std::filesystem::exists(candidate, ec) && !ec)
+          return candidate.string();
+      }
     }
   }
   return std::nullopt;
@@ -116,7 +145,7 @@ M::resolveXlinkerLibraries(const State &state,
     if (hasSharedLibraryExtension(arg)) {
       std::error_code ec;
       if (std::filesystem::exists(arg.str(), ec) && !ec) {
-        libraries.emplace_back(arg.str());
+        libraries.emplace_back(resolveLoadablePath(arg));
         continue;
       }
       state.reportWarning(
