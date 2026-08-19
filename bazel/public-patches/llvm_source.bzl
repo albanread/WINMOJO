@@ -59,6 +59,9 @@ PATCHES = [
     # reads as input filenames.
     "//bazel/public-patches:llvm-msvc-linkopts-driver-syntax.patch",
     "//bazel/public-patches:llvm-clang-msvc-linkopts-driver-syntax.patch",
+    # The overlay hardcodes Windows to X86, so a Windows ARM64 build gets
+    # LLVM_NATIVE_ARCH=X86 and an x86_64 default triple.
+    "//bazel/public-patches:llvm-windows-arm64-native-arch.patch",
 ]
 
 def _llvm_source_impl(module_ctx):
