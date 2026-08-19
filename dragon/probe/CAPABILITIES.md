@@ -13,6 +13,8 @@ and the second is the one that matters.
 | **Full model graph** on CPU | ✅ | ✅ | InceptionV3-shaped, 298 ms, 2 result sets |
 | **Full model graph** on **HTP** | ✅ | ✅ | same graph, 1377 ms incl. prepare, 2 result sets |
 | **Full model graph** on `QnnGpu` | ✅ | ❌ | `CL_INVALID_OPERATION` in the recording queue |
+| **Our own synthetic model** on CPU + HTP | ✅ | ✅ | 4 MiB matmul chain; HTP matches CPU to 0.062% |
+| HTP above ~4 MiB | — | ⚠️ | untested — DSP wedged, see below |
 
 ## Reproducing
 
@@ -112,6 +114,57 @@ doing anyway, but is not available from the stock tool.
 OpenCL dispatch already works and is measurably fast; QnnGpu's graph path is
 broken here and its escape hatch is unreachable from tooling. The NPU is the
 backend where QNN earns its place.
+
+## The HTP wedges, and it will fake a size ceiling if you let it
+
+Measured 2026-08-19 while starting W4.0. **This is the most operationally
+important finding so far and it nearly went in the notes as a wrong number.**
+
+Sequence:
+
+| Step | CPU | HTP |
+|---|---|---|
+| Our synthetic 4 MiB matmul chain | ok | **ok**, matches CPU to 0.062% |
+| Same model, 128 MiB of weights | ok, 783 ms | **FAIL** at 41 ms |
+| **Control: re-run the 4 MiB model** | ok | **FAIL, identically** |
+
+The failure is always the same and always at session open:
+
+```
+<E> DspTransport.openSession qnn_open failed, 0x80000406, prio 100
+```
+
+**So 128 MiB is not a ceiling.** The DSP session layer wedged, and once wedged
+every HTP run fails the same way — including one that had succeeded minutes
+earlier. Reporting "the HTP tops out at 128 MiB" would have been wrong, and it
+would have shaped the whole NPU plan around a fiction.
+
+What the wedge is and is not:
+
+- **Not the device.** Windows reports *Snapdragon(R) X - X126100 - Qualcomm(R)
+  Hexagon(TM) NPU* with status **OK**.
+- **Not the driver stack broadly.** `QnnCpu` keeps working throughout.
+- **Not a stray process.** No `qnn-net-run` or holder process survives.
+- **Not transient.** Still failing after a 20 s settle.
+- It is specific to the **fastRPC / DSP session** layer, and it needs a reboot.
+
+This matches the pre-HND behaviour recorded in the `geniex-gemma4-npu-setup`
+notes, which the driver update was thought to have fixed. It has not been fixed
+for this failure path.
+
+### The rule that follows
+
+**Every HTP probe must be followed by a control run of a known-good small
+model.** If the control still passes, the failure was real. If the control
+fails too, the DSP is wedged and *everything measured after the first failure
+is void*. `dragon/qnn/htp_ceiling_sweep.ps1` enforces this and refuses to start
+if the DSP is already wedged.
+
+Still unknown, and honestly unknowable until after a reboot: whether the
+128 MiB model actually exceeded something, or simply triggered the wedge. It
+failed at **41 ms during session open**, before weights would plausibly have
+been transferred, which hints at a session-sizing rejection rather than a
+transfer failure — but that is a hypothesis, not a measurement.
 
 ## Building a model library — the working recipe
 

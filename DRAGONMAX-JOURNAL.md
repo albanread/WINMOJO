@@ -616,3 +616,84 @@ them produces an honest error:
 
 W4.0, now genuinely unblocked: find the HTP's real model-size ceiling. Then a
 like-for-like CPU-vs-HTP comparison on something bigger than a two-op graph.
+
+---
+
+## 2026-08-19 — W4.0: our own model runs on the NPU, and the DSP wedges
+
+### The pipeline is ours now
+
+`dragon/qnn/gen_matmul_model.py` emits a QNN model of controllable weight size —
+a chain of `[1,D] x [D,D]` MatMul layers, `.cpp` plus a `.bin` tar of raw
+tensors in the SDK's own converter format. `build_model_lib.ps1` turns it into
+an ARM64 DLL. So we can now generate, build and run arbitrary graphs on the
+Hexagon NPU without going through anyone's converter.
+
+First real result, 4 MiB of weights (dim 512, 4 layers):
+
+| Backend | Result |
+|---|---|
+| `QnnCpu` | Finished Executing Graphs |
+| `QnnHtp` | **Finished Executing Graphs** |
+
+And they agree: **max |cpu − htp| = 0.0348 against a max magnitude of 56.1, so
+0.062% relative.** The HTP is computing at reduced internal precision, as
+expected, and getting the right answer. That is the first end-to-end numerical
+validation of our own workload on the NPU.
+
+One generator bug worth noting: weights were originally built with a
+`struct.pack` per element, which at dim=4096 is 16.7M calls per layer and
+dominates everything. Now tiles a 17-float period instead — 128 MiB in 0.31 s.
+
+### Then the ceiling test, and a lesson
+
+Scaled to 128 MiB (dim 2048, 8 layers). CPU ran it in 783 ms. HTP failed at
+41 ms:
+
+```
+<E> DspTransport.openSession qnn_open failed, 0x80000406, prio 100
+```
+
+The obvious conclusion is "the HTP tops out somewhere under 128 MiB". **That
+conclusion would have been wrong.** Re-ran the 4 MiB model that had passed
+minutes earlier as a control — and it failed identically.
+
+**The DSP session layer wedges.** Once wedged, every HTP run fails the same way
+at session open, regardless of size. What it is not:
+
+- not the device — Windows reports the Hexagon NPU with status **OK**
+- not the driver stack broadly — `QnnCpu` keeps working throughout
+- not a stray process — nothing is holding a session
+- not transient — still failing after a 20 s settle
+
+This is the pre-HND behaviour from the `geniex-gemma4-npu-setup` notes, which
+the driver update was believed to have fixed. It has not been, for this path.
+
+**So the 128 MiB number measures nothing.** Whether that model exceeded a real
+limit, or merely triggered the wedge, is unknown. It failed during *session
+open*, before weights would plausibly have moved, which hints at a
+session-sizing rejection — but that is a hypothesis, not a measurement, and it
+stays labelled as one.
+
+### The rule, now enforced in code
+
+**Every HTP probe is followed by a control run of a known-good small model.**
+Control passes → the failure was real. Control fails → the DSP is wedged and
+everything after the first failure is void.
+
+`dragon/qnn/htp_ceiling_sweep.ps1` bakes this in: it builds a small control
+model, refuses to start if the DSP is already wedged, and after any HTP failure
+re-runs the control to label the result `CEILING` or `WEDGED` before deciding
+whether to continue.
+
+This is the same shape as every other trap in this project — a plausible number
+that is actually an artefact. The difference is that this one would have set
+the NPU roadmap around a fiction, so the control discipline is worth the cost.
+
+### Blocked on a reboot
+
+The DSP will not recover without one. Recovery might also come from disabling
+and re-enabling the NPU in Device Manager, but that is a system change and the
+user's call, not mine.
+
+After a reboot: run `htp_ceiling_sweep.ps1` and get the real number.
