@@ -20,8 +20,14 @@
 #include <cstddef>
 #include <optional>
 
-#ifdef _MSC_VER
+// Guarded on the architecture, not on the compiler. _MSC_VER only says the
+// compiler is MSVC-compatible, which clang also is when targeting the MSVC ABI,
+// so on Windows ARM64 this pulled in the x86 intrinsics header and failed with
+// "This header is only meant to be used on x86 and x64 architecture".
+#if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
 #include <immintrin.h> // _mm_pause
+#elif defined(_MSC_VER) && defined(_M_ARM64)
+#include <intrin.h> // __yield
 #endif
 
 namespace M {
@@ -75,8 +81,14 @@ public:
         // The client can disable the more expensive yielding mechanisms below
         // by setting "shouldYieldToOS" to true.
         !shouldYieldToOS) {
-#if MODULAR_WINDOWS
+#if MODULAR_WINDOWS && MODULAR_X86_64
       _mm_pause();
+#elif MODULAR_WINDOWS && MODULAR_ARM
+      // __yield emits the ARM64 YIELD hint. Preferred here over the isb inline
+      // assembly used for ARM below, because inline assembly stops LLVM
+      // computing a function's length for SEH unwind info on Windows ARM64,
+      // which is a hard error rather than a warning.
+      __yield();
 #elif MODULAR_X86_64
       __builtin_ia32_pause();
 #elif MODULAR_ARM

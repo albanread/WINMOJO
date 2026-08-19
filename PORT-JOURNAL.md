@@ -854,3 +854,72 @@ These stdlib changes are deliberately **not** being written ahead of a working
 to compile it would mostly be guesswork, and the compiler is the thing that tells
 us whether the FFI declarations are right. The predicate work above is the
 exception: it is additive, mechanical, and needed regardless.
+
+---
+
+## G4 — The build system is done (2026-04-19)
+
+**Build 18 attempted all 8,847 actions for the first time.** Every remaining
+failure is now first-party C++ rather than build configuration, which makes this
+the boundary between porting the *build* and porting the *code*.
+
+### The last build-system problem: three command-line limits
+
+Windows has three ceilings and this port hit all of them, each with a different
+signature:
+
+| Limit | Applies to | Symptom |
+| --- | --- | --- |
+| 8,191 (cmd.exe) | anything through the .bat wrapper | `The command line is too long` |
+| 32,767 (CreateProcess) | direct .exe invocation | bare `Exit -1`, no diagnostic |
+
+The second is the dangerous one: no error text, just a failed launch, which
+reads like a crash rather than a length problem.
+
+Compiles needed `compiler_param_file`; links needed **both** the
+`linker_param_file` feature *and* `cc_toolchain`'s `supports_param_files`
+attribute, which defaults to False. Enabling the feature alone changed the
+argument count by exactly zero. The attribute decides whether params are used at
+all; the feature only describes how they are formatted. rules_cc's own MSVC
+configuration sets both, which was the clue worth following sooner.
+
+### The remaining surface: ~9 files
+
+Roughly 70 targets fail, but they collapse to a small set of substrate files:
+
+| Area | Problem |
+| --- | --- |
+| `Support/Threading/SpinWaiter.h` | includes `<immintrin.h>` on Windows |
+| `Support/lib/Debugger.cpp` | `IsDebuggerPresent`, `Sleep` undeclared |
+| `Support/lib/CPUCache.cpp`, `Threading/HWInfo.h` | `sched.h` |
+| `AsyncRT/lib/Support/Semaphore.cpp` | `semaphore.h` |
+| `Init/lib/DevelopmentSignalHandler.cpp` | `sys/ucontext.h` |
+| `Support/lib/FileSystemExtras.cpp` | `ssize_t` |
+| `AsyncRT/.../Globals.cpp`, `Support/lib/Context.cpp` | assorted |
+| link | `CommandLineToArgvW` needs shell32 |
+
+### A latent bug that is not Windows-specific
+
+`SpinWaiter.h` guarded its x86 intrinsics on `_MSC_VER`:
+
+```cpp
+#ifdef _MSC_VER
+#include <immintrin.h> // _mm_pause
+#endif
+```
+
+and dispatched with `#if MODULAR_WINDOWS` *before* checking the architecture, so
+Windows implied `_mm_pause()`. `_MSC_VER` says the compiler is MSVC-compatible,
+which clang also is when targeting the MSVC ABI; it says nothing about the
+target architecture. **MSVC on Windows ARM64 would hit this too.** The macros to
+use were already there and correct — `MODULAR_ARM` is true for `_M_ARM64`.
+
+This is the same shape as the dependency guards fixed earlier, where
+`defined(__aarch64__) && defined(__clang__)` was taken to mean a Unix-like
+target: **a compiler macro used as a proxy for an architecture**. It is the most
+common single mistake found in this port.
+
+Windows ARM64 uses `__yield()` rather than the `isb` inline assembly the other
+ARM targets use, deliberately: inline assembly stops LLVM computing a function's
+length for SEH unwind info, which is a hard error here rather than a warning.
+The same constraint already forced upb onto its portable path.
