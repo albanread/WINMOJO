@@ -165,6 +165,9 @@ single_version_override(
     patch_strip = 1,
     patches = [
         "//bazel/public-patches:abseil-windows-arm64-nontemporal.patch",
+        # Weak definitions in an archive are not pulled in by a weak reference,
+        # which ELF tolerates and lld-link does not.
+        "//bazel/public-patches:abseil-alwayslink-weak-definitions.patch",
     ],
     version = "20250814.2",
 )
