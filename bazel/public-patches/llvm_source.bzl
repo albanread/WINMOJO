@@ -48,6 +48,10 @@ PATCHES = [
     # __builtin_shufflevector calls operate on MSVC's __n128 union rather than a
     # clang vector type. Selects BLAKE3's portable implementation there.
     "//bazel/public-patches:llvm-blake3-no-neon-windows.patch",
+    # is_windows_msvc keys on the compiler being msvc-cl, so a clang driver
+    # targeting the MSVC ABI matched neither it nor the MinGW setting, and the
+    # link fell through to the Unix default of -lm, -lpthread and -ldl.
+    "//bazel/public-patches:llvm-windows-msvc-abi-with-clang-driver.patch",
 ]
 
 def _llvm_source_impl(module_ctx):

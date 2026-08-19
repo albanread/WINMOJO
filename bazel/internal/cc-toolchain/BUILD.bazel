@@ -169,10 +169,22 @@ cc_make_variable(
 )
 
 # There is no --sysroot for a windows-msvc target, so the MSVC and SDK headers
-# are passed as -isystem. The paths are formatted from directory targets rather
-# than written literally: Bazel rejects absolute paths outside the execution
-# root, and allowlist_include_directories is what permits a system include path
-# to sit outside the sandbox at all.
+# are passed as ordinary include flags. The paths are formatted from directory
+# targets rather than written literally: Bazel rejects absolute paths outside
+# the execution root, and allowlist_include_directories is what permits a system
+# include path to sit outside the sandbox at all.
+#
+# -idirafter, not -isystem. Bazel passes a target's own `includes` as -isystem
+# for external repositories, so the sysroot and the project would share a search
+# class, and within a class the first listed wins. These come from the toolchain
+# and are emitted first, so any SDK header would shadow a project header of the
+# same name. curl found this the hard way: the UCRT ships its own share.h, which
+# silently displaced curl's lib/share.h and left every call to Curl_share_lock
+# undeclared. -idirafter is searched after -I, -isystem and the standard system
+# directories, which is what a sysroot wants and matches what MSVC does with
+# INCLUDE. It still marks the directories as system headers, which matters
+# because this toolchain compiles with -Wall -Wextra -pedantic and several
+# -Werror flags.
 cc_args(
     name = "windows_arm64_includes",
     actions = [
@@ -186,15 +198,15 @@ cc_args(
         "@sysroot-windows-arm64//sdk_winrt:dir",
     ],
     args = [
-        "-isystem",
+        "-idirafter",
         "{vc_include}",
-        "-isystem",
+        "-idirafter",
         "{sdk_ucrt}",
-        "-isystem",
+        "-idirafter",
         "{sdk_shared}",
-        "-isystem",
+        "-idirafter",
         "{sdk_um}",
-        "-isystem",
+        "-idirafter",
         "{sdk_winrt}",
     ],
     data = [
