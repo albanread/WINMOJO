@@ -85,7 +85,10 @@ REM overridden by them.
   echo # emits -Wl,-rpath,$ORIGIN/... regardless, which lld-link reads as a
   echo # filename. The feature is neither overridable nor separately disableable
   echo # in the toolchain, so it is switched off by name here.
-  echo build --features=-runtime_library_search_directories
+  echo build --features=-runtime_library_search_directories
+  echo # --host_features as well: every failing link was a [for tool] target,
+  echo # and --features applies only to the target configuration.
+  echo build --host_features=-runtime_library_search_directories
   echo import %%workspace%%/build/local-resources.bazelrc
 )
 
