@@ -98,7 +98,7 @@ before it.
 | **D2** | Baseline: one reference workload timed on NPU / GPU / CPU | |
 | **D3** | **Strategy gate** — pick the spine on D2's evidence | **done** — MAX-compatible ABI, Mojo the standard way |
 | **W1–W3** | ABI spec · device runtime on Adreno · SPIR-V compiler trio | **done** (code-complete) |
-| **HANDOFF** | GPU line integration-ready for WINMOJO | **declared 2026-08-19** — [`dragon/HANDOFF.md`](dragon/HANDOFF.md) |
+| **HANDOFF** | GPU line integration-ready for WINMOJO | **declared 2026-08-19** — runbook: [`INTEGRATEME.md`](INTEGRATEME.md), contract: [`dragon/HANDOFF.md`](dragon/HANDOFF.md) |
 | **GPU GOAL** | `dragon/mojo-tests/adreno_saxpy.mojo` passes via `mojo build` | blocked on WINMOJO G3+ |
 | **NPU line** | QNN graph path (W4) — independent of `mojo.exe` | 1 GiB @ 4.1x CPU measured; continues |
 | **GOAL** | A real model runs end-to-end on Snapdragon, beating CPU-only | |

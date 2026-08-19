@@ -1,5 +1,10 @@
 # DragonMax → WINMOJO integration handoff
 
+> The step-by-step runbook version of this document — copy-paste commands,
+> smoke tests, bounce-back table, checklist — is [`/INTEGRATEME.md`](../INTEGRATEME.md)
+> at the repo root. Integrators should start there; this file is the contract
+> behind it.
+
 **Decision, 2026-08-19: the DragonMax GPU compile line is code-complete and
 available for integration.** Everything DragonMax owns on the path from Mojo
 source to Adreno silicon is written, committed on `main`, and traced end to
