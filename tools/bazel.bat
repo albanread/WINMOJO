@@ -85,7 +85,7 @@ REM overridden by them.
   echo # this every sh_binary — including bazel_tools' collect_coverage, an
   echo # implicit dep of every test — fails analysis with "No suitable shell
   echo # toolchain found", taking the whole test graph down with it.
-  echo build --repo_env=BAZEL_SH=%BAZEL_SH%
+  echo build "--repo_env=BAZEL_SH=%BAZEL_SH%"
   echo # PE/COFF has no rpath: a DLL is found through the executable's directory
   echo # and the search path. Bazel's runtime_library_search_directories feature
   echo # emits -Wl,-rpath,$ORIGIN/... regardless, which lld-link reads as a
