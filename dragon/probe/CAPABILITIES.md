@@ -14,7 +14,7 @@ and the second is the one that matters.
 | **Full model graph** on **HTP** | ✅ | ✅ | same graph, 1377 ms incl. prepare, 2 result sets |
 | **Full model graph** on `QnnGpu` | ✅ | ❌ | `CL_INVALID_OPERATION` in the recording queue |
 | **Our own synthetic model** on CPU + HTP | ✅ | ✅ | 4 MiB matmul chain; HTP matches CPU to 0.062% |
-| HTP above ~4 MiB | — | ⚠️ | untested — DSP wedged, see below |
+| **128 MiB model** on HTP | ✅ | ✅ | 555 ms on the QAIRT 2.45 runtime |
 
 ## Reproducing
 
@@ -115,56 +115,39 @@ OpenCL dispatch already works and is measurably fast; QnnGpu's graph path is
 broken here and its escape hatch is unreachable from tooling. The NPU is the
 backend where QNN earns its place.
 
-## The HTP wedges, and it will fake a size ceiling if you let it
+## The HTP does NOT wedge — corrected 2026-08-19
 
-Measured 2026-08-19 while starting W4.0. **This is the most operationally
-important finding so far and it nearly went in the notes as a wrong number.**
+An earlier version of this page reported that the DSP wedged and needed a
+reboot, and that the HTP topped out under 128 MiB. **Both were wrong.** See
+`../qnn/HTP-RUNTIMES.md` for the full account.
 
-Sequence:
+The real fault: the **QAIRT 2.42 runtime** stopped opening DSP sessions, while
+GenieX's bundled **QAIRT 2.45** ran the same models on the same device
+throughout — including the 128 MiB model, in 555 ms.
 
-| Step | CPU | HTP |
+| Runtime | 4 MiB | 128 MiB |
 |---|---|---|
-| Our synthetic 4 MiB matmul chain | ok | **ok**, matches CPU to 0.062% |
-| Same model, 128 MiB of weights | ok, 783 ms | **FAIL** at 41 ms |
-| **Control: re-run the 4 MiB model** | ok | **FAIL, identically** |
+| SDK QAIRT 2.42 + its unsigned skels | ran, then stopped | fails at session open |
+| GenieX QAIRT 2.45 + its skels | **ok**, 395 ms | **ok**, 555 ms |
 
-The failure is always the same and always at session open:
+The failure signature `DspTransport.openSession qnn_open failed, 0x80000406` is
+documented by Qualcomm as "the HTP Stub library cannot find the respective Skel
+library" — but `ADSP_LIBRARY_PATH` was set correctly and the skel was present,
+so the documented cause was ruled out by test.
 
-```
-<E> DspTransport.openSession qnn_open failed, 0x80000406, prio 100
-```
+**The methodological lesson:** my control run re-used the *same runtime* as the
+failing run, so when it failed too, that looked like proof of a dead device. It
+was nothing of the sort. **A control that shares the suspected fault with the
+test is not a control.** The control that actually worked was a *different QNN
+runtime against the same device*.
 
-**So 128 MiB is not a ceiling.** The DSP session layer wedged, and once wedged
-every HTP run fails the same way — including one that had succeeded minutes
-earlier. Reporting "the HTP tops out at 128 MiB" would have been wrong, and it
-would have shaped the whole NPU plan around a fiction.
+Working configuration today: GenieX's `htp-files` for both `QnnHtp.dll` and
+`ADSP_LIBRARY_PATH`. Model DLLs are runtime-agnostic.
 
-What the wedge is and is not:
-
-- **Not the device.** Windows reports *Snapdragon(R) X - X126100 - Qualcomm(R)
-  Hexagon(TM) NPU* with status **OK**.
-- **Not the driver stack broadly.** `QnnCpu` keeps working throughout.
-- **Not a stray process.** No `qnn-net-run` or holder process survives.
-- **Not transient.** Still failing after a 20 s settle.
-- It is specific to the **fastRPC / DSP session** layer, and it needs a reboot.
-
-This matches the pre-HND behaviour recorded in the `geniex-gemma4-npu-setup`
-notes, which the driver update was thought to have fixed. It has not been fixed
-for this failure path.
-
-### The rule that follows
-
-**Every HTP probe must be followed by a control run of a known-good small
-model.** If the control still passes, the failure was real. If the control
-fails too, the DSP is wedged and *everything measured after the first failure
-is void*. `dragon/qnn/htp_ceiling_sweep.ps1` enforces this and refuses to start
-if the DSP is already wedged.
-
-Still unknown, and honestly unknowable until after a reboot: whether the
-128 MiB model actually exceeded something, or simply triggered the wedge. It
-failed at **41 ms during session open**, before weights would plausibly have
-been transferred, which hints at a session-sizing rejection rather than a
-transfer failure — but that is a hypothesis, not a measurement.
+Unresolved: why 2.42 stops. Leading hypothesis is unsigned process domains — the
+SDK ships only `hexagon-v81/unsigned/`, and the platform validator hinted at
+`testsig`. `QnnHtpDevice_UseSignedProcessDomain_t` is the lever to test it.
+Not established; not to be written up as the cause until it is.
 
 ## Building a model library — the working recipe
 
