@@ -65,16 +65,57 @@ The one piece of good news: because `device_context.mojo` declares the entire
 ABI it calls, the surface a reimplementation would have to satisfy is fully
 enumerable from open source. It is large but it is not a mystery.
 
-## What *is* open, and it is a lot
+## What *is* open, and it is far more than the two gaps
 
-| Component | Path | Nature |
+The unpublished parts are **both runtime layers**. Everything on the compile
+side is present, including the compiler itself.
+
+| Component | Path | Size / nature |
 |---|---|---|
-| Mojo compiler + stdlib | `mojo/` | Apache-2.0, WINMOJO's scope |
-| GPU programming model | `mojo/stdlib/std/gpu/` | device-side intrinsics, Mojo |
-| **GPU target tables** | `mojo/stdlib/std/gpu/host/info.mojo` | MLIR targets per arch |
-| **Kernel library** | `max/kernels/src/` | matmul, attention, conv, nn — all Mojo |
+| **KGEN — the Mojo compiler** | `KGEN/` | **326 `.cpp`, 234 `.h`, 66 `.td`** |
+| Mojo stdlib | `mojo/stdlib/` | Apache-2.0, WINMOJO's scope |
+| GPU programming model | `mojo/stdlib/std/gpu/` | device-side intrinsics |
+| GPU target tables | `mojo/stdlib/std/gpu/host/info.mojo` | MLIR target per arch |
+| **stdlib plugin mechanism** | `mojo/stdlib/std/_plugin/` | `cuda/`, `hip/`, `metal/` |
+| Kernel library | `max/kernels/src/` | matmul, attention, conv, nn — Mojo |
 | Graph API / layers / pipelines | `max/python/max/{graph,nn,pipelines}` | Python |
 | Async runtime + CPU device | `AsyncRT/` | C++ |
+
+**KGEN being open is the single most important correction to the first pass of
+this document.** An earlier draft implied the compiler was out of reach. It is
+not: `stdlib_plugin` is resolved in `KGEN/lib/KGENDialect/KGENAttrs.cpp`, and
+that code treats it as an **opaque string** (`getStdlibPlugin()`), validated
+against no closed enum. The plugin registry on the Mojo side
+(`std/_plugin/selector.mojo`) matches that string at compile time.
+
+Scope check before anyone gets excited: a plugin is *narrow*. `MetalPlugin` is
+twelve lines and leaves every hook at its default. The hooks cover
+target-specific stdlib behaviour — `exp`, `tanh`, address-space lookup, `print`
+emission, `abort`, assertion messages — **not** code generation. Adding an
+`adreno` plugin is an afternoon; it is not the port.
+
+## How Modular targets a GPU with no LLVM backend
+
+This is the most useful thing in the tree, and it is not in any design doc.
+
+Apple's AIR is not an upstream LLVM target, and there is no AIR backend in the
+open KGEN either. So how does `triple = "air64-apple-macosx"` produce code?
+
+`KGEN/lib/Compiler/ObjectCompiler/LLVM/` answers it:
+
+- `Transforms/LLVMIRDowngradePass.cpp` — *"Transform LLVM IR for backend
+  compilation that takes older version of LLVM IR."*
+- `Bitcode/17/`, `Bitcode/19/`, `Bitcode/21/` — three **vendored, version-pinned
+  bitcode writers**.
+
+They do not write a backend. They emit LLVM IR, downgrade it to the bitcode
+version the foreign toolchain accepts, and hand it to Apple's own compiler.
+
+**That is the template for Adreno**, and Adreno is the easier case: LLVM has had
+an in-tree SPIR-V backend since 18, and Qualcomm's driver compilers
+(`qcvkarm64xcompiler.dll` for Vulkan, `qcclarm64xcompiler.dll` for OpenCL) are
+already on this machine and already consume SPIR-V. We hand off at a documented
+interchange format instead of a reverse-engineered bitcode version.
 
 ## Metal is the precedent that matters
 

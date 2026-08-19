@@ -200,3 +200,99 @@ Windows reference in this tree is WINMOJO's own G2 work.
 **Corrected framing, now used in the docs: source-available, not
 source-complete.** The unpublished parts happen to be exactly the two a new
 hardware backend would need. The ladder is unchanged.
+
+---
+
+## 2026-08-19 — design docs, and a large correction in our favour
+
+Went looking for Modular's own design docs, and found that the D0 picture was
+**too pessimistic about the compile side**. Three findings, each of which moves
+work from impossible to merely hard.
+
+### KGEN — the Mojo compiler — is open source
+
+`KGEN/` holds **326 `.cpp`, 234 `.h`, 66 `.td`**. D0 implied the compiler was
+out of reach. It is not.
+
+Concretely, `stdlib_plugin` is resolved in `KGEN/lib/KGENDialect/KGENAttrs.cpp`
+and treated as an **opaque string** via `getStdlibPlugin()` — no closed enum, no
+validation against a fixed vendor list. The Mojo-side registry
+(`std/_plugin/selector.mojo`) matches that string at compile time, and
+`std/_plugin/` already contains `cuda/`, `hip/`, `metal/`.
+
+Scope check so nobody over-reads this: `MetalPlugin` is **twelve lines** with
+every hook left at default. The hooks are `exp`, `tanh`, address-space lookup,
+`print` emission, `abort`, assertion messages — stdlib behaviour, *not* codegen.
+An `adreno` plugin is an afternoon. It is not the port.
+
+### How Modular targets a GPU whose backend they do not have
+
+The best thing in the tree, and it is in no design doc.
+
+Apple's AIR is not an upstream LLVM target, and there is no AIR backend in the
+open KGEN. So what makes `triple = "air64-apple-macosx"` work?
+
+- `KGEN/lib/Compiler/ObjectCompiler/LLVM/Transforms/LLVMIRDowngradePass.cpp` —
+  *"Transform LLVM IR for backend compilation that takes older version of LLVM
+  IR."*
+- `Bitcode/17/`, `Bitcode/19/`, `Bitcode/21/` — vendored, version-pinned
+  bitcode writers.
+
+**They do not write backends for closed GPUs. They emit something the vendor's
+compiler already accepts.** For Adreno that is SPIR-V — a documented standard
+with an in-tree LLVM backend since 18, consumed by `qcvkarm64xcompiler.dll` and
+`qcclarm64xcompiler.dll`, both already installed. Strictly easier than what they
+did for Metal, since we hand off at a published format rather than a guessed
+bitcode version.
+
+### The device ABI is exactly 109 symbols, and most are optional
+
+Enumerated properly this time (the first grep missed multi-line `external_call`
+and undercounted by 5x). Across `max/mojo/max/gpu/host/*.mojo`:
+
+| Tier | Count | For Adreno |
+|---|---|---|
+| Core — lifecycle, buffers, transfers, streams, kernels, events | ~68 | must implement |
+| Vendor escape hatches — `cuda_context`, `metal_device`, `cuda_tensorMapEncode*` | 13 | omit |
+| Graph capture — `DeviceGraphBuilder_*` (15), `DeviceGraph_*` (4), +1 | 20 | stub unsupported |
+| Multi-GPU / peer / multicast | 8 | stub — one GPU |
+
+Bring-up subset is roughly **30 symbols**: create/release, one buffer type,
+H2D/D2H, one stream, `loadFunction` + `enqueueFunctionDirect`, `synchronize`.
+A far smaller problem than "109 unpublished functions" first suggested.
+
+### Candidate A is dead
+
+D3's option A — reimplement the ABI so Modular's own engine sits on top — is
+**eliminated on evidence, not preference**. Upstream `MODULE.bazel` mentions
+Windows **zero** times; there is no engine binary for Windows ARM64 to sit on.
+D3 is now a two-way choice between B (independent runtime) and C (NPU-first),
+and D2's numbers decide it.
+
+### A constraint worth writing down before it bites
+
+`AsyncRT/docs/AsyncRTRuntime.md`: **"The design assumes that work items never
+block."** QNN's `graphExecute` is synchronous and long; OpenCL's `clFinish`
+blocks. Neither can run on a `WorkQueue` worker without stalling a core the
+runtime thinks is busy. We need a dispatch thread per device from the start,
+signalling back through `AsyncValue`. Retrofitting that means redoing the whole
+completion path, and the failure mode is bad scaling rather than a crash — the
+kind of bug that hides.
+
+### Written
+
+- `dragon/design/ARCHITECTURE.md` — the stack with both gaps marked, codegen
+  route per surface, the ABI tiering, what we add and where.
+- `dragon/design/PORTING-PLAN.md` — support matrix (honest about the NPU int8
+  cell being the point), dependency graph, work breakdown W1–W6, risk register,
+  explicit non-goals.
+- `dragon/design/UPSTREAM-DOCS.md` — Modular's docs tiered by usefulness.
+  Tier 1 is three items; the Blackwell `wgmma` material is a dead end for us.
+
+`MAX-ANATOMY.md` corrected — it understated how much is open.
+
+### Next
+
+W1 (extract the ABI spec) needs nothing and can start now. So can W4's QNN
+harness, which never needs `mojo.exe`. D1b still wants a checked numeric result
+out of each surface.

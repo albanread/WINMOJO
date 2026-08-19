@@ -28,26 +28,43 @@ Forked at WINMOJO `dde8f83773` (its G3).
 no Mojo at all — they characterise hardware and drive vendor runtimes directly
 from C++/Python. D0–D2 run in parallel with WINMOJO G3–G6.
 
+## Documents
+
+| Read | For |
+|---|---|
+| [`dragon/recon/MAX-ANATOMY.md`](dragon/recon/MAX-ANATOMY.md) | what is published and what is not |
+| [`dragon/recon/HARDWARE.md`](dragon/recon/HARDWARE.md) | measured Snapdragon capability |
+| [`dragon/design/ARCHITECTURE.md`](dragon/design/ARCHITECTURE.md) | the stack, the two gaps, codegen routes |
+| [`dragon/design/PORTING-PLAN.md`](dragon/design/PORTING-PLAN.md) | support matrix, work breakdown W1–W6, risks |
+| [`dragon/design/UPSTREAM-DOCS.md`](dragon/design/UPSTREAM-DOCS.md) | which of Modular's docs help, and which mislead |
+
 ## What we are up against
 
 Read [`dragon/recon/MAX-ANATOMY.md`](dragon/recon/MAX-ANATOMY.md) before
 planning anything. The short version:
 
-**MAX's engine and GPU device runtime are closed source.** `max/python/max/_core`
-is `.pyi` stubs only, and the `AsyncRT_DeviceContext_*` symbols that
-`device_context.mojo` calls are absent from the open `AsyncRT/` tree, which
-ships a CPU device and nothing else. A Snapdragon backend cannot be added by
-editing MAX's runtime; that source is not public.
+MAX is **source-available but not source-complete**. Licensing is not the
+issue — the tree is Apache-2.0 with LLVM exceptions and MAX use falls under the
+permissive Community License. Two specific things were never published, and
+both are runtime layers:
 
-**What is open is still substantial:** the whole Mojo GPU programming model,
-the MLIR target tables in `info.mojo`, the entire `max/kernels` library in
-Mojo, and the Python graph/nn/pipelines stack. Modular even ships
-`mojo/stdlib/docs/adding-gpu-targets.md`, a step-by-step guide to adding a new
-GPU architecture — and Apple Metal already exists there as a third, non-CUDA,
-non-HIP, tile-based, unified-memory backend. That is the closest architectural
-analogue to Adreno and the diff worth imitating.
+1. **The graph engine.** `_core/BUILD.bazel` names sources under
+   `max/python/max/_core/internal/`, a directory absent from the tree and from
+   all of its git history.
+2. **The accelerator device runtime.** The 109 `AsyncRT_*` symbols that
+   `device_context.mojo` calls have zero hits in any C/C++ file tree-wide.
 
-So: **compile side open, run side closed.** That split shapes every decision.
+**Everything on the compile side is open, including the compiler** — KGEN is
+326 `.cpp` files in `KGEN/`, the target tables and stdlib plugin mechanism are
+editable Mojo, and all of `max/kernels` is source. So codegen is a question of
+work, not of access.
+
+Better still, Modular already shipped a GPU whose backend they do not have:
+Apple AIR is not an upstream LLVM target, and they handle it by emitting
+downgraded LLVM bitcode for Apple's own compiler to lower
+(`LLVMIRDowngradePass.cpp`, plus vendored bitcode writers for LLVM 17/19/21).
+**Adreno is the easier version of that trick** — hand Qualcomm's driver
+compiler SPIR-V, a documented format with an in-tree LLVM backend.
 
 ## The performance fact that steers the design
 
@@ -106,18 +123,22 @@ Exit criterion: each returns numbers we can check.
 
 Three candidate spines. D2's numbers decide, and the choice is the user's.
 
-**A. Reimplement the device ABI.** Provide `AsyncRT_DeviceContext_*` over
-OpenCL/Vulkan for Adreno, so Modular's own stack sits on top unmodified.
-Highest compatibility; bets on a closed engine accepting a foreign device, which
-we cannot verify from source.
+**~~A. Reimplement the device ABI~~ — eliminated on evidence.** The idea was to
+provide `AsyncRT_DeviceContext_*` over OpenCL so Modular's stack sits on top
+unmodified. But there is no engine binary for Windows ARM64 to sit on: upstream
+`MODULE.bazel` mentions Windows **zero** times. Nothing to link against.
 
 **B. Independent runtime.** Take the open parts — Mojo kernels, graph API, nn
 layers — and execute them on our own engine across all three surfaces. Most
-work, no dependency on closed binaries, fully ours.
+work, no dependency on unpublished binaries, fully ours.
 
-**C. NPU-first, narrow.** Skip the GPU. MAX graph → QNN graph lowering, AOT
-context binaries, HTP execution. Smallest scope, best payoff per the table
-above, and it matches what the hardware actually rewards.
+**C. NPU-first, narrow.** Skip the GPU. Graph → QNN lowering, AOT context
+binaries, HTP execution. Smallest scope, best payoff per the table above, and it
+matches what the hardware actually rewards.
+
+D2's numbers decide between B and C — specifically whether the Adreno X1-45
+earns its place. Work breakdown for both is in
+[`dragon/design/PORTING-PLAN.md`](dragon/design/PORTING-PLAN.md).
 
 ## Rules carried in from prior ports
 
