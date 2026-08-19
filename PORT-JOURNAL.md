@@ -603,6 +603,61 @@ failed.
 **Next: G4** — point this at KGEN and build the compiler itself. The toolchain is
 proven on one translation unit; KGEN is 326 `.cpp` files plus LLVM.
 
+---
+
+## G4 — Building KGEN (2026-08-19, in progress)
+
+### Method
+
+`--nobuild` runs loading and analysis without executing actions, so each missing
+`select()` branch surfaces in about a second instead of hours into an LLVM
+compile. Worth using for the whole of this gate.
+
+### Fixed so far
+
+- **`Support:Base` library naming.** Only the shared-library *suffix* was
+  platform-dependent; the `lib` prefix and `.a` were unconditional. PE/COFF uses
+  no prefix and `.dll`/`.lib`, so the whole set is now selected. These have to
+  agree with the `artifact_name_patterns` the Windows toolchain declares, or
+  runtime lookups construct names that were never produced. The select is
+  *flattened*, not nested: `_process_defines` parses it with with_cfg.bzl's
+  `decompose_select_elements`, which cannot handle a select inside a select.
+- **Mojo's own target triple** is `aarch64-pc-windows-msvc`. Deliberately no
+  `--target-cpu`: the other platforms pin one because their hardware is known,
+  whereas Windows ARM64 spans several Snapdragon generations whose LLVM names
+  move between releases. The triple is the part that must be right.
+- **tcmalloc / gperftools** support neither Windows, so those aliases resolve to
+  `empty_lib` and the process keeps the system allocator. A performance choice,
+  not a correctness one.
+- **`Support:Globals`** force-links an MLIR symbol by its *Itanium-mangled*
+  name, which does not exist under the MSVC ABI. It only matters for matching
+  MLIR types across separate shared objects, and `mojo.exe` links as a single
+  static binary, so Windows takes no linkopt. Must be revisited before building
+  Mojo as DLLs.
+- **LLDB** attaches natively on Windows rather than through a debug server, so
+  no `LLDB_DEBUGSERVER_PATH` is exported.
+
+### Current blocker: crashpad has no Windows targets
+
+`Support:CrashReporting` depends unconditionally on `@crashpad//:client`, and
+Modular's hand-written `crashpad.BUILD` — 679 lines — only defines
+`mini_chromium_linux`/`_macos`, `util_linux`/`_macos` and `client_linux`/`_macos`.
+Its compat include list literally reads `includes = ["compat/non_win"]`.
+
+The good news is that **the Windows sources are already in the vendored
+tarball**: `client/crashpad_client_win.cc`, `client/crash_report_database_win.cc`,
+`util/win/` (63 files), `compat/win/` (9 files) and `handler/win/`. Nothing needs
+fetching or patching upstream — only Modular's Bazel wrapper needs extending.
+
+So this is mechanical rather than novel: add `mini_chromium_windows`,
+`util_windows` and `client_windows` targets, swap `compat/non_win` for
+`compat/win`, and translate the source lists from crashpad's own GN build.
+
+Scope note: only the **client** is linked into `mojo.exe`. `handler/win` builds a
+separate crash-handler executable and is not on the critical path, so the client
+comes first. Crash reporting stays in the graph either way — MAX uses it, and
+removing it would leave a hole the MAX port inherits.
+
 ### Repository state
 
 The fork now has a real remote: `origin` =
