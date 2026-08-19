@@ -174,17 +174,20 @@ cc_make_variable(
 # the execution root, and allowlist_include_directories is what permits a system
 # include path to sit outside the sandbox at all.
 #
-# -idirafter, not -isystem. Bazel passes a target's own `includes` as -isystem
-# for external repositories, so the sysroot and the project would share a search
-# class, and within a class the first listed wins. These come from the toolchain
-# and are emitted first, so any SDK header would shadow a project header of the
-# same name. curl found this the hard way: the UCRT ships its own share.h, which
-# silently displaced curl's lib/share.h and left every call to Curl_share_lock
-# undeclared. -idirafter is searched after -I, -isystem and the standard system
-# directories, which is what a sysroot wants and matches what MSVC does with
-# INCLUDE. It still marks the directories as system headers, which matters
-# because this toolchain compiles with -Wall -Wextra -pedantic and several
-# -Werror flags.
+# -isystem, deliberately, despite a known drawback.
+#
+# Bazel passes a target's own `includes` as -isystem for external repositories,
+# so the sysroot shares a search class with the project, and within a class the
+# first listed wins. These come from the toolchain and are emitted first, so an
+# SDK header shadows a project header of the same name. The UCRT ships share.h,
+# which displaces curl's own lib/share.h; that is patched in curl rather than
+# fixed here.
+#
+# -idirafter looks like the principled fix and was tried. It searches after -I
+# and -isystem, which does resolve the shadowing, but it also stops clang
+# associating these headers with the builtin module map, so layering_check
+# rejects every standard library include and the failure count went from 8 to
+# 1,696. Module attribution matters more than the occasional name collision.
 cc_args(
     name = "windows_arm64_includes",
     actions = [
@@ -198,15 +201,15 @@ cc_args(
         "@sysroot-windows-arm64//sdk_winrt:dir",
     ],
     args = [
-        "-idirafter",
+        "-isystem",
         "{vc_include}",
-        "-idirafter",
+        "-isystem",
         "{sdk_ucrt}",
-        "-idirafter",
+        "-isystem",
         "{sdk_shared}",
-        "-idirafter",
+        "-isystem",
         "{sdk_um}",
-        "-idirafter",
+        "-isystem",
         "{sdk_winrt}",
     ],
     data = [
