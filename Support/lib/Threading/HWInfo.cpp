@@ -38,10 +38,21 @@
 
 #ifdef _MSC_VER
 #include "llvm/Support/WindowsError.h"
-#include <cpuid.h>
+
+// windows.h has to come first: iphlpapi.h uses USHORT, GUID and friends via the
+// SDK's own ifdef.h without including anything that defines them, so listing it
+// alphabetically ahead of windows.h fails with a run of unknown type names.
+#include <windows.h>
+
 #include <intrin.h>
 #include <iphlpapi.h>
-#include <windows.h>
+
+// cpuid.h is x86 only and errors out on any other architecture. _MSC_VER says
+// the compiler is MSVC-compatible, not that the target is x86, and clang
+// defines it when targeting the MSVC ABI on ARM64 too.
+#if defined(_M_IX86) || defined(_M_X64)
+#include <cpuid.h>
+#endif
 #else
 #include <ifaddrs.h>
 #include <sys/socket.h>

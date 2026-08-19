@@ -73,12 +73,12 @@ M::AsyncRT::getThreadAffinityCpuIds(bool withAffinity, size_t numThreads,
            << "sockets " << numThreads;
   }
   if (usingLimits &&
-      numThreads > std::max(1UL, (*limitsOr->millicores) / 1000)) {
+      numThreads > std::max<size_t>(1, (*limitsOr->millicores) / 1000)) {
     // If we are limited by the cgroup in some way, then we need to cap our
     // untilization. Note that the computation of the affinity set is likely to
     // be affected here, meaning that it will be unbounded, but we don't need
     // to set that explicitly.
-    size_t limit = std::max(1UL, (*limitsOr->millicores) / 1000);
+    size_t limit = std::max<size_t>(1, (*limitsOr->millicores) / 1000);
     LDBG() << "getThreadAffinityCpuIds: Reducing number of threads from "
            << numThreads << " to " << limit << ".";
     numThreads = limit;
