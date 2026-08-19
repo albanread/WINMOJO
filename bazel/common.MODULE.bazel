@@ -68,6 +68,11 @@ archive_override(
         # rules_mojo looks for libpython* in the hermetic runtime; Windows
         # CPython names it pythonXY.dll, so every mojo_test failed analysis.
         "//bazel/public-patches:rules_mojo_windows_libpython.patch",
+        # Windows runfiles are a manifest, not a tree, so the OS loader can't
+        # find dependency DLLs that exist only as runfiles entries; compiled
+        # mojo tests died at startup with STATUS_DLL_NOT_FOUND. Materialize
+        # each dependency DLL beside the test executable.
+        "//bazel/public-patches:rules_mojo_windows_dlls_beside_binary.patch",
     ],
     strip_prefix = "rules_mojo-47643a3b441c20c3a351b8807e37c547338557c8",
     urls = [

@@ -60,9 +60,20 @@ llvm_config.with_environment(
     "MOJO_PYTHON",
     sys.executable,
 )
-libpython = str(
-    Path(sys.executable).resolve().parent.parent / "lib" / var("INSTSONAME")
-)
+if sys.platform == "win32":
+    # sysconfig's INSTSONAME is a POSIX-only variable naming the libpython
+    # soname; Windows CPython keeps its runtime as pythonXY.dll beside the
+    # interpreter. python3.dll is deliberately not used: it is the
+    # stable-ABI forwarding stub, not the full embedding API.
+    _exe_dir = Path(sys.executable).resolve().parent
+    libpython = str(
+        _exe_dir
+        / "python{}{}.dll".format(sys.version_info.major, sys.version_info.minor)
+    )
+else:
+    libpython = str(
+        Path(sys.executable).resolve().parent.parent / "lib" / var("INSTSONAME")
+    )
 
 llvm_config.with_environment(
     "MOJO_PYTHON_LIBRARY",

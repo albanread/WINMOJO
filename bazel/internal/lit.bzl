@@ -303,7 +303,11 @@ EOF
             "@llvm-project//llvm:FileCheck",
             "@llvm-project//llvm:not",
         ],
-        "env": env_for_available_tools() | default_env | env | mojo_test_env,
+        # PATHEXT: Bazel scrubs the test environment, and lit's which() only
+        # tries the .exe suffix when PATHEXT is present, so on Windows every
+        # tool lookup (FileCheck, not, count) missed binaries that were right
+        # there. Meaningless on other platforms, where lit ignores it.
+        "env": {"PATHEXT": ".COM;.EXE;.BAT;.CMD"} | env_for_available_tools() | default_env | env | mojo_test_env,
         "env_inherit": env_inherit,
         "size": size,
         "exec_properties": get_default_exec_properties(tags, gpu_constraints) | exec_properties,

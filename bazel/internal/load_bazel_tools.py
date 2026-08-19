@@ -197,28 +197,50 @@ for key in sorted(os.environ.keys()):
             # Add the toolchain's stdlib to the PYTHONPATH so nested actions
             # that run python use this toolchain instead of the system
             # toolchain, which may not exist or be compatible
-            arch = "x86_64" if platform.machine() == "x86_64" else "aarch64"
-            machine = (
-                "apple-darwin"
-                if platform.system() == "Darwin"
-                else "unknown-linux-gnu"
-            )
-            major = platform.python_version_tuple()[0]
-            minor = platform.python_version_tuple()[1]
-            toolchain_path = (
-                f"rules_python~~python~python_{major}_{minor}_{arch}-{machine}"
-            )
-            lib_path = f"{toolchain_path}/lib/python{major}.{minor}"
-            bin_path = f"{toolchain_path}/bin"
-            value = f"{value}:{_R.Rlocation(lib_path)}"
+            if platform.system() == "Windows":
+                # The interpreter executing this configuration is already the
+                # hermetic toolchain, so derive the paths from it. The POSIX
+                # branch below spells out rules_python's repo layout, and
+                # neither that layout (bin/, lib/pythonX.Y) nor those repo
+                # names exist for the Windows runtime.
+                import sys as _sys
+                import sysconfig as _sysconfig
 
-            # Make sure the toolchain's python3 is earlier in the PATH than any other python executable
-            os.environ["PATH"] = (
-                os.path.abspath(_R.Rlocation(bin_path))
-                + ":"
-                + os.environ["PATH"]
-            )
-            llvm_config.with_environment("PATH", os.environ["PATH"])
+                _stdlib = _sysconfig.get_path("stdlib")
+                if _stdlib:
+                    value = f"{value}{os.pathsep}{_stdlib}"
+
+                # Make sure the toolchain's python is earlier in the PATH
+                # than any other python executable.
+                os.environ["PATH"] = (
+                    os.path.dirname(os.path.abspath(_sys.executable))
+                    + os.pathsep
+                    + os.environ["PATH"]
+                )
+                llvm_config.with_environment("PATH", os.environ["PATH"])
+            else:
+                arch = "x86_64" if platform.machine() == "x86_64" else "aarch64"
+                machine = (
+                    "apple-darwin"
+                    if platform.system() == "Darwin"
+                    else "unknown-linux-gnu"
+                )
+                major = platform.python_version_tuple()[0]
+                minor = platform.python_version_tuple()[1]
+                toolchain_path = (
+                    f"rules_python~~python~python_{major}_{minor}_{arch}-{machine}"
+                )
+                lib_path = f"{toolchain_path}/lib/python{major}.{minor}"
+                bin_path = f"{toolchain_path}/bin"
+                value = f"{value}:{_R.Rlocation(lib_path)}"
+
+                # Make sure the toolchain's python3 is earlier in the PATH than any other python executable
+                os.environ["PATH"] = (
+                    os.path.abspath(_R.Rlocation(bin_path))
+                    + ":"
+                    + os.environ["PATH"]
+                )
+                llvm_config.with_environment("PATH", os.environ["PATH"])
         elif key in ("ASAN_OPTIONS", "LSAN_OPTIONS"):
             new_options = []
             for option in value.split(","):

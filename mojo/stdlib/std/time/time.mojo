@@ -82,8 +82,76 @@ def _clock_gettime(clockid: Int) -> _CTimeSpec:
 
 
 @always_inline
+def _filetime_pair_as_nanoseconds(
+    kernel_time: UInt64, user_time: UInt64
+) -> Int:
+    """Sums two FILETIME durations (100ns units) into nanoseconds."""
+    return Int((kernel_time + user_time) * 100)
+
+
+@always_inline
+def _gettime_as_nsec_windows(clockid: Int) -> Int:
+    """Windows counterparts of the POSIX clocks, selected by the same ids."""
+    if clockid == _CLOCK_MONOTONIC or clockid == _CLOCK_MONOTONIC_RAW:
+        # QueryPerformanceCounter is the invariant monotonic clock; ticks
+        # are converted to nanoseconds with the whole-second part split off
+        # first so the multiply cannot overflow 64 bits.
+        var counter = Int64(0)
+        var frequency = Int64(0)
+        _ = external_call["QueryPerformanceCounter", Int32](
+            Pointer(to=counter)
+        )
+        _ = external_call["QueryPerformanceFrequency", Int32](
+            Pointer(to=frequency)
+        )
+        var seconds = counter // frequency
+        var remainder = counter % frequency
+        return Int(
+            seconds * _NSEC_PER_SEC + remainder * _NSEC_PER_SEC // frequency
+        )
+    elif clockid == _CLOCK_PROCESS_CPUTIME_ID:
+        var creation = UInt64(0)
+        var exit = UInt64(0)
+        var kernel = UInt64(0)
+        var user = UInt64(0)
+        var process = external_call["GetCurrentProcess", Int]()
+        _ = external_call["GetProcessTimes", Int32](
+            process,
+            Pointer(to=creation),
+            Pointer(to=exit),
+            Pointer(to=kernel),
+            Pointer(to=user),
+        )
+        return _filetime_pair_as_nanoseconds(kernel, user)
+    elif clockid == _CLOCK_THREAD_CPUTIME_ID:
+        var creation = UInt64(0)
+        var exit = UInt64(0)
+        var kernel = UInt64(0)
+        var user = UInt64(0)
+        var thread = external_call["GetCurrentThread", Int]()
+        _ = external_call["GetThreadTimes", Int32](
+            thread,
+            Pointer(to=creation),
+            Pointer(to=exit),
+            Pointer(to=kernel),
+            Pointer(to=user),
+        )
+        return _filetime_pair_as_nanoseconds(kernel, user)
+    else:  # _CLOCK_REALTIME
+        # 100ns FILETIME units since 1601-01-01, rebased to the Unix epoch.
+        comptime _FILETIME_UNIX_EPOCH_OFFSET = 116444736000000000
+        var filetime = UInt64(0)
+        external_call["GetSystemTimePreciseAsFileTime", NoneType](
+            Pointer(to=filetime)
+        )
+        return Int((filetime - _FILETIME_UNIX_EPOCH_OFFSET) * 100)
+
+
+@always_inline
 def _gettime_as_nsec_unix(clockid: Int) -> Int:
-    comptime if CompilationTarget.is_linux():
+    comptime if CompilationTarget.is_windows():
+        return _gettime_as_nsec_windows(clockid)
+    elif CompilationTarget.is_linux():
         var ts = _clock_gettime(clockid)
         return ts.as_nanoseconds()
     else:
@@ -352,6 +420,12 @@ def sleep(sec: Float64):
                 note="time.sleep() is only supported on NVIDIA and AMD GPUs",
             ]()
 
+    comptime if CompilationTarget.is_windows():
+        # Sleep takes milliseconds; scheduling granularity is about a
+        # millisecond, matching what nanosleep delivers in practice.
+        external_call["Sleep", NoneType](UInt32(sec * Float64(_MSEC_PER_SEC)))
+        return
+
     comptime NANOSECONDS_IN_SECOND = 1_000_000_000
     var total_secs = floor(sec)
     var tv_spec = _CTimeSpec(
@@ -372,5 +446,9 @@ def sleep(sec: Int):
 
     comptime if is_gpu():
         return sleep(Float64(sec))
+
+    comptime if CompilationTarget.is_windows():
+        external_call["Sleep", NoneType](UInt32(sec * _MSEC_PER_SEC))
+        return
 
     external_call["sleep", NoneType](Int32(sec))
