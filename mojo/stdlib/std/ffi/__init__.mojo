@@ -137,6 +137,10 @@ def _get_max_path() -> Int:
         return 4096
     elif CompilationTarget.is_macos():
         return 1024
+    elif CompilationTarget.is_windows():
+        # Win32's legacy MAX_PATH is 260, but the Unicode APIs and long-path
+        # aware processes accept far longer; 32767 is the documented ceiling.
+        return 32767
     # Default POSIX limit
     else:
         return 256
@@ -150,6 +154,10 @@ def _c_long_dtype[unsigned: Bool = False]() -> DType:
     ):
         # LP64: long is 64-bit on 64-bit systems (e.g. x86_64 or aarch64)
         return DType.uint64 if unsigned else DType.int64
+    elif is_64bit() and CompilationTarget.is_windows():
+        # LLP64: Windows keeps `long` at 32 bits on 64-bit targets; only
+        # `long long` and pointers widen.
+        return DType.uint32 if unsigned else DType.int32
     elif is_32bit():
         # ILP32: long is 32-bit on 32-bit systems (e.g. x86 or RISC-V 32bit)
         return DType.uint32 if unsigned else DType.int32

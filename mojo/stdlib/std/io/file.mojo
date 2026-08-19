@@ -38,7 +38,7 @@ from std.os.path import dirname
 from std.ffi import c_int, c_ssize_t, external_call
 from std.sys import size_of
 from std.sys._libc_errno import ErrNo, get_errno
-from std.sys.info import platform_map
+from std.sys.info import CompilationTarget, platform_map
 
 from std.collections import Span
 
@@ -54,26 +54,105 @@ comptime O_WRONLY = 0x0001
 comptime O_RDWR = 0x0002
 """Open file for reading and writing."""
 
-# File creation flags
-comptime O_CREAT = platform_map[T=Int, "O_CREAT", linux=0x0040, macos=0x0200]()
+# File creation flags. Windows values are the UCRT's _O_* constants from
+# <fcntl.h>; the UCRT provides the POSIX file API under underscore-prefixed
+# names, so the whole layer maps over rather than needing a Win32 rewrite.
+comptime O_CREAT = platform_map[
+    T=Int, "O_CREAT", linux=0x0040, macos=0x0200, windows=0x0100
+]()
 """Create file if it doesn't exist."""
 
-comptime O_TRUNC = platform_map[T=Int, "O_TRUNC", linux=0x0200, macos=0x0400]()
+comptime O_TRUNC = platform_map[
+    T=Int, "O_TRUNC", linux=0x0200, macos=0x0400, windows=0x0200
+]()
 """Truncate file to zero length."""
 
 comptime O_APPEND = platform_map[
-    T=Int, "O_APPEND", linux=0x0400, macos=0x0008
+    T=Int, "O_APPEND", linux=0x0400, macos=0x0008, windows=0x0008
 ]()
 """Append mode: writes always go to end of file."""
 
 comptime O_CLOEXEC = platform_map[
-    T=Int, "O_CLOEXEC", linux=0x80000, macos=0x1000000
+    T=Int, "O_CLOEXEC", linux=0x80000, macos=0x1000000, windows=0x0080
 ]()
-"""Close file descriptor on exec."""
+"""Close file descriptor on exec.
+
+Windows has no exec, so the corresponding guarantee is that the descriptor is
+not inherited by child processes: _O_NOINHERIT.
+"""
+
+comptime O_BINARY = platform_map[
+    T=Int, "O_BINARY", linux=0, macos=0, windows=0x8000
+]()
+"""Suppress the CRT's end-of-line translation.
+
+Windows descriptors default to text mode, which rewrites CRLF to LF on read
+and back on write, so byte counts stop matching file sizes and binary data is
+silently corrupted. POSIX has no such mode and needs no flag.
+"""
 
 # ===----------------------------------------------------------------------=== #
 # Helper functions
 # ===----------------------------------------------------------------------=== #
+
+
+def _sys_open(path: String, flags: Int) -> c_int:
+    """Opens `path`, returning a descriptor or a negative value on failure."""
+    var path_str = path
+    comptime if CompilationTarget.is_windows():
+        # _wopen would be needed for paths outside the active code page; the
+        # narrow entry point matches the rest of this module, which is
+        # byte-oriented throughout.
+        return external_call["_open", c_int, num_fixed_args=2](
+            path_str.as_c_string_slice(), c_int(flags), c_int(0o666)
+        )
+    else:
+        return external_call["open", c_int, num_fixed_args=2](
+            path_str.as_c_string_slice(), c_int(flags), c_int(0o666)
+        )
+
+
+def _sys_close(fd: Int) -> c_int:
+    """Closes a descriptor."""
+    comptime if CompilationTarget.is_windows():
+        return external_call["_close", c_int](c_int(fd))
+    else:
+        return external_call["close", c_int](c_int(fd))
+
+
+def _sys_read[BufT: AnyType, //](fd: Int, buffer: BufT, count: Int) -> Int:
+    """Reads up to `count` bytes, returning the count read or -1."""
+    comptime if CompilationTarget.is_windows():
+        # _read is declared `int _read(int, void *, unsigned int)`. Its result
+        # must be taken as c_int: a 64-bit return type would pick up whatever
+        # happens to sit in the upper half of the register.
+        return Int(
+            external_call["_read", c_int](c_int(fd), buffer, c_int(count))
+        )
+    else:
+        return Int(external_call["read", c_ssize_t](c_int(fd), buffer, count))
+
+
+def _sys_write[BufT: AnyType, //](fd: Int, buffer: BufT, count: Int) -> Int:
+    """Writes up to `count` bytes, returning the count written or -1."""
+    comptime if CompilationTarget.is_windows():
+        return Int(
+            external_call["_write", c_int](c_int(fd), buffer, c_int(count))
+        )
+    else:
+        return Int(external_call["write", c_ssize_t](c_int(fd), buffer, count))
+
+
+def _sys_lseek(fd: Int, offset: Int64, whence: Int) -> Int64:
+    """Repositions the descriptor, returning the new offset or -1."""
+    comptime if CompilationTarget.is_windows():
+        # _lseek takes a 32-bit long offset; _lseeki64 is the one that can
+        # address a file larger than 2 GB.
+        return external_call["_lseeki64", Int64](
+            c_int(fd), offset, c_int(whence)
+        )
+    else:
+        return external_call["lseek", Int64](c_int(fd), offset, Int(whence))
 
 
 def _open_file(path: String, mode: String) raises -> Int:
@@ -97,15 +176,15 @@ def _open_file(path: String, mode: String) raises -> Int:
     var create_dirs = False
 
     if mode == "r":
-        flags = O_RDONLY | O_CLOEXEC
+        flags = O_RDONLY | O_CLOEXEC | O_BINARY
     elif mode == "w":
-        flags = O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC
+        flags = O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | O_BINARY
         create_dirs = True
     elif mode == "rw":
-        flags = O_RDWR | O_CREAT | O_CLOEXEC
+        flags = O_RDWR | O_CREAT | O_CLOEXEC | O_BINARY
         create_dirs = True
     elif mode == "a":
-        flags = O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC
+        flags = O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC | O_BINARY
         create_dirs = True
     else:
         raise Error(
@@ -131,10 +210,7 @@ def _open_file(path: String, mode: String) raises -> Int:
     # int open(const char *path, int oflag, ...);
     # Mode 0o666 allows read/write for owner, group, and others (modified by
     # umask).
-    var path_str = path
-    var fd = external_call["open", c_int, num_fixed_args=2](
-        path_str.as_c_string_slice(), c_int(flags), c_int(0o666)
-    )
+    var fd = _sys_open(path, flags)
 
     if fd < 0:
         var err = get_errno()
@@ -187,7 +263,7 @@ struct FileHandle(Defaultable, Movable, Writer):
         if self.handle < 0:
             return
 
-        var result = external_call["close", c_int](c_int(self.handle))
+        var result = _sys_close(self.handle)
 
         if result < 0:
             var err = get_errno()
@@ -310,10 +386,8 @@ struct FileHandle(Defaultable, Movable, Writer):
             raise Error("invalid file handle")
 
         var fd = self._get_raw_fd()
-        var bytes_read = external_call["read", c_ssize_t](
-            fd,
-            buffer.unsafe_ptr(),
-            len(buffer) * size_of[dtype](),
+        var bytes_read = _sys_read(
+            fd, buffer.unsafe_ptr(), len(buffer) * size_of[dtype]()
         )
 
         if bytes_read < 0:
@@ -384,7 +458,7 @@ struct FileHandle(Defaultable, Movable, Writer):
             # successfully read. This may return with a partial read, and
             # signifies EOF with a result of zero bytes.
             var chunk_bytes_to_read = len(result) - num_read
-            var chunk_bytes_read = external_call["read", c_ssize_t](
+            var chunk_bytes_read = _sys_read(
                 fd,
                 result.unsafe_ptr().unsafe_offset(num_read),
                 chunk_bytes_to_read,
@@ -453,7 +527,7 @@ struct FileHandle(Defaultable, Movable, Writer):
 
         var fd = self._get_raw_fd()
         # lseek returns off_t which is typically Int64 on Unix systems
-        var pos = external_call["lseek", Int64](fd, Int64(offset), Int(whence))
+        var pos = _sys_lseek(fd, Int64(offset), Int(whence))
 
         if pos < 0:
             var err = get_errno()
@@ -498,9 +572,7 @@ struct FileHandle(Defaultable, Movable, Writer):
             raise Error("invalid file handle")
 
         var fd = self._get_raw_fd()
-        var bytes_written = external_call["write", c_ssize_t](
-            fd, bytes.unsafe_ptr(), len(bytes)
-        )
+        var bytes_written = _sys_write(fd, bytes.unsafe_ptr(), len(bytes))
 
         if bytes_written < 0:
             var err = get_errno()
@@ -588,7 +660,7 @@ struct FileHandle(Defaultable, Movable, Writer):
         var total_written = 0
         while total_written < len(bytes):
             var fd = self._get_raw_fd()
-            var bytes_written = external_call["write", c_ssize_t](
+            var bytes_written = _sys_write(
                 fd,
                 bytes.unsafe_ptr().unsafe_offset(total_written),
                 len(bytes) - total_written,
@@ -658,9 +730,7 @@ struct FileHandle(Defaultable, Movable, Writer):
 
         while total_written < len:
             var current_ptr = ptr.unsafe_offset(total_written)
-            var bytes_written = external_call["write", c_ssize_t](
-                fd, current_ptr, len - total_written
-            )
+            var bytes_written = _sys_write(fd, current_ptr, len - total_written)
 
             if bytes_written < 0:
                 var err = get_errno()
