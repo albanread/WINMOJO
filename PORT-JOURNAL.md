@@ -658,6 +658,36 @@ separate crash-handler executable and is not on the critical path, so the client
 comes first. Crash reporting stays in the graph either way — MAX uses it, and
 removing it would leave a hole the MAX port inherits.
 
+### Recon: crashpad is the *only* remaining analysis blocker
+
+Rather than write the crashpad BUILD blind, the dependency was removed in a
+throwaway edit purely to enumerate what else stands between here and compiling
+C++. Two things came out of it, and the edit was reverted immediately.
+
+**1. `//KGEN:mojo` is the wrong target.** It aliases to `mojo-full`, the
+debugger-bundled variant, whose dependency chain is:
+
+```
+//KGEN:mojo -> mojo-full -> //KGEN:gdb-server
+  -> lldb:gdb-server -> lldb:lldb-server   <-- marked incompatible
+```
+
+LLVM's own Bazel overlay marks `lldb-server` incompatible on Windows, correctly:
+LLDB attaches natively there rather than through a remote debug server. The
+plain `//KGEN/tools/mojo:mojo` target is the compiler binary without the
+debugger bundle, and is the right thing to build. This is target selection, not
+scope reduction — `mojo-full` is a packaging concern.
+
+**2. With crashpad out of the way, analysis of the entire Mojo compiler passes
+on Windows ARM64.** `bazel build --nobuild //KGEN/tools/mojo:mojo` exits 0.
+Putting the dependency back leaves exactly one error, in crashpad's own
+`BUILD.bazel:463`.
+
+So the build-system work is nearly done: crashpad is the last plumbing gate, and
+past it the remaining work is compiling roughly 326 KGEN `.cpp` files plus LLVM
+and MLIR — real C++, where MSVC STL differences, the `-Werror` set and POSIX
+assumptions in the source will be the actual obstacles.
+
 ### Repository state
 
 The fork now has a real remote: `origin` =
