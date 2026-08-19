@@ -963,3 +963,55 @@ adreno-x1` → stdlib `AdrenoX1` target → SpirvLowering marks kernels →
 SpirvBackend emits `.spv`) → `dragonrt.dll` (`loadFunction` →
 `clCreateProgramWithIL`) → Qualcomm driver → Adreno silicon. Every arrow except
 the last is open source in this repository.
+
+---
+
+## 2026-08-19 — offload flow traced; GPU line declared integration-ready
+
+### The trace (full version in `dragon/design/OFFLOAD-FLOW.md`)
+
+The question left open by the trio: what carries the `.spv` from
+`SpirvBackend::emitObject` to the `loadFunction` call. Answer, with file:line
+evidence — **comptime compilation, and nothing else**:
+
+`DeviceFunction` picks `_emission_kind = "object"` for everything except
+cross-compiled NVIDIA (`device_context.mojo:2796`) → `_compile_code` is the
+`compile_info` comptime intrinsic (`compile.mojo:36`) → the elaborator invokes
+`ObjectCompiler::emitOffloadKernels` (`ObjectCompiler.cpp:1811`), which splits
+per exported kernel, tags each with `kgen.offload.kernelid` (:1486), and
+dispatches by triple to the backend → our `emitObject` buffer lands in
+`CompiledFunctionInfo.asm` (bytes, despite the name — `loadFunction` passes
+`asm.byte_length()`) → `AsyncRT_DeviceContext_loadFunction` → dragonrt sniffs
+the magic → `clCreateProgramWithIL` → driver → silicon.
+
+**No packaging step exists to build.** The `.spv` never meets a linker or the
+host image. `emitObject` returning the raw buffer was the right call, and the
+kernel's name survives to `clCreateKernel` because SPIR_KERNEL marking makes
+the LLVM function name the OpEntryPoint name.
+
+Also settled: only NVIDIA-cross uses `"asm"`, so the stdlib default already
+routes Adreno down the object path — no stdlib change needed there.
+
+### The decision
+
+**The GPU compile line is code-complete and available for WINMOJO to
+integrate.** Declared in `dragon/HANDOFF.md`, which is now the contract:
+
+- **Finish line, made executable:** `dragon/mojo-tests/adreno_saxpy.mojo` —
+  standard Mojo, nothing DragonMax-specific, passes ⇒ done. Two cheaper early
+  checks: `--print-supported-accelerators` shows the Adreno section (proves
+  registration survived linking), and `--emit=asm` yields SPIR-V assembly
+  (proves codegen without the runtime).
+- **First-compile checklist** — the only items that can bounce back to us:
+  the `cconv` namespace spelling, the Buffer idioms, glob/alwayslink pickup,
+  and SPIRV-backend-on-Windows-host. Each has a named, bounded fix.
+- **One decision deliberately left to WINMOJO:** how the built executable
+  finds `AsyncRT_*` — link `dragonrt.lib` alongside their AsyncRT (symbol sets
+  are disjoint by construction), or delay-load the DLL. Sequencing-sensitive
+  with their G4/G5, so it is theirs.
+
+Not in the handoff: the NPU/QNN line (runs today without `mojo.exe`), runtime
+hardening, kernels. Those stay here.
+
+The ladder in `DRAGONMAX.md` now reads: D0–D3 done, W1–W3 done, **HANDOFF
+declared**, GPU GOAL = the acceptance test, blocked only on WINMOJO G3+.
