@@ -221,8 +221,8 @@ static ErrorOr<bool> isExistingDirectory(const std::filesystem::path &path) {
   bool isDirectory = std::filesystem::is_directory(path, ec);
   if (ec)
     return Error(llvm::formatv(
-        "could not determine if output path '{0}' is a directory: {1}", path,
-        ec.message()));
+        "could not determine if output path '{0}' is a directory: {1}",
+        path.string(), ec.message()));
   return isDirectory;
 }
 

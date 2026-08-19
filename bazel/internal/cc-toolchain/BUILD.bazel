@@ -96,6 +96,19 @@ cc_sysroot(
             "//:modular_config_ubsan": ["//bazel/internal/cc-toolchain/features:ubsan"],
             "//conditions:default": [],
         }) + select({
+            # supports_start_end_lib makes Bazel hand the linker loose object
+            # files wrapped in --start-lib/--end-lib rather than archives. That
+            # is an ELF linker feature; lld-link has no such flag, and the only
+            # effect here is that a link gets one argument per object file.
+            # AsyncRTRuntimeGlobals.dll came to 2,339 arguments and blew past
+            # CreateProcess's 32767 character limit. Archives keep it to one
+            # argument per library.
+            "@platforms//os:windows": [],
+            "//conditions:default": [
+                # https://github.com/bazelbuild/rules_cc/issues/322
+                "//bazel/internal/cc-toolchain/features:supports_start_end_lib",
+            ],
+        }) + select({
             # Both limits bite on Windows and neither exists elsewhere.
             # compiler_param_file keeps compile actions under cmd.exe's 8191
             # character ceiling, and linker_param_file keeps links under the
@@ -124,7 +137,6 @@ cc_sysroot(
             "//bazel/internal/cc-toolchain/features:parse_headers_shim",
             "//bazel/internal/cc-toolchain/features:opt_feature",
             "@rules_cc//cc/toolchains/args:experimental_replace_legacy_action_config_features",
-            "//bazel/internal/cc-toolchain/features:supports_start_end_lib",  # https://github.com/bazelbuild/rules_cc/issues/322
             "//bazel/internal/cc-toolchain/args/interface-libraries",
         ],
         known_features = [

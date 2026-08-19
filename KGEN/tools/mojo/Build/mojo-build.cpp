@@ -691,7 +691,10 @@ static int linkOutput(OutputType outputType, const State &state,
     }
   }();
   // Validate this is a valid filename using the `path` ctor.
-  defaultOutputName = std::filesystem::path(defaultOutputName).filename();
+  // .string(): filename() yields a path, which converts implicitly to
+  // std::string only where path::value_type is char.
+  defaultOutputName =
+      std::filesystem::path(defaultOutputName).filename().string();
 
   std::error_code ec;
   std::filesystem::path cwd = std::filesystem::current_path(ec);

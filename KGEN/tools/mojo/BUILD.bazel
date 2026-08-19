@@ -88,6 +88,9 @@ _MOJO_LINKOPTS = select({
         "-Wl,--export-dynamic-symbol=__jit_debug_*",
         "-Wl,--export-dynamic-symbol=mlir*",
     ],
+    # Debug/RPCClient.cpp talks to the debug server over a socket, and on
+    # Windows the sockets API lives in ws2_32 rather than in libc.
+    "@platforms//os:windows": ["-lws2_32"],
     "//conditions:default": [],
 })
 
