@@ -21,6 +21,12 @@
 #include <csignal>
 #include <thread>
 
+#ifdef _WIN32
+// IsDebuggerPresent and Sleep. The _WIN32 branch below was already written but
+// had evidently never been compiled, since the header it needs was missing.
+#include <windows.h>
+#endif
+
 using namespace M;
 
 void M::waitForDebuggerToAttach(int timeoutSeconds) {

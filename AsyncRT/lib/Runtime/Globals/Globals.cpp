@@ -15,6 +15,13 @@
 // doesn't support it
 #if defined(__APPLE__)
 #include <gperftools/tcmalloc.h>
+#elif defined(_WIN32)
+// Neither tcmalloc nor gperftools supports Windows, so the Bazel alias resolves
+// to an empty library there and this header does not exist. The allocations
+// below fall back to the CRT's aligned allocator. Note that memory from
+// _aligned_malloc must be released with _aligned_free and never with free, so
+// tc_delete has to match tc_new.
+#include <malloc.h>
 #else
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wprivate-header"
@@ -51,6 +58,8 @@ MODULAR_CXX_EXPORT void *TCMallocGlobals::tc_new(size_t alignment,
                                                  size_t size) {
 #if defined(__APPLE__)
   return ::tc_memalign(alignment, size);
+#elif defined(_WIN32)
+  return _aligned_malloc(size, alignment);
 #else
   return TCMallocInternalMemalign(alignment, size);
 #endif
@@ -60,6 +69,10 @@ MODULAR_CXX_EXPORT void *TCMallocGlobals::tc_new(size_t alignment, size_t size,
 #if defined(__APPLE__)
   // gperftools has no NUMA partition support; fall back to unpartitioned alloc.
   return ::tc_memalign(alignment, size);
+#elif defined(_WIN32)
+  // No NUMA-partitioned allocator here either.
+  (void)numaPartition;
+  return _aligned_malloc(size, alignment);
 #else
   return TCMallocInternalMemalignNumaPartition(alignment, size, numaPartition);
 #endif
@@ -67,6 +80,8 @@ MODULAR_CXX_EXPORT void *TCMallocGlobals::tc_new(size_t alignment, size_t size,
 MODULAR_CXX_EXPORT void TCMallocGlobals::tc_delete(void *ptr) {
 #if defined(__APPLE__)
   return ::tc_free(ptr);
+#elif defined(_WIN32)
+  return _aligned_free(ptr);
 #else
   return TCMallocInternalFree(ptr);
 #endif

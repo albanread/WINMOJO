@@ -17,6 +17,7 @@
 #include "Support/SymbolExport.h"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -49,7 +50,11 @@ private:
   /// This is a global counter of the number of AsyncValue instances currently
   /// live in the process.  This is intended to be used for debugging only, and
   /// is only kept in sync if `isAllocationTrackingEnabled()` returns true.
-  static MODULAR_CXX_EXPORT std::atomic<ssize_t> totalAllocatedAsyncValues;
+  /// std::ptrdiff_t rather than ssize_t: the latter is POSIX and does not
+  /// exist on Windows. Both are the platform's signed size type, so this is a
+  /// no-op everywhere else.
+  static MODULAR_CXX_EXPORT std::atomic<std::ptrdiff_t>
+      totalAllocatedAsyncValues;
 };
 
 // TCMalloc has internal global state that needs to live here in AsyncRTGlobals.

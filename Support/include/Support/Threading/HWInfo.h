@@ -26,7 +26,6 @@
 #include <map>
 #include <memory>
 #include <optional>
-#include <sched.h>
 #include <string>
 #include <vector>
 
@@ -158,6 +157,11 @@ struct CPULimits {
 
 namespace Detail {
 #if HAVE_LINUX_X86_SYSTEM_INFO
+// cpu_set_t. Only the Linux x86 path needs this, and the header does not exist
+// on Windows, so it belongs inside the guard rather than beside the other
+// standard includes at the top of the file.
+#include <sched.h>
+
 /// Specifies CPU quota per period of CPU time allotted by the Linux CFS.
 struct linuxCPULimits {
   int quota_us = -1;

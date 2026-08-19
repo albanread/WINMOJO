@@ -79,7 +79,9 @@ doLockedFileOperation(const std::filesystem::path &filePath,
             std::filesystem::exists(filePath.parent_path(), parentExistsEC);
         std::string ecMsg = errorCodeToString(err);
         std::string parentMsg =
-            "Parent path: " + std::string(filePath.parent_path().c_str()) +
+            // .string() rather than std::string(.c_str()): path::value_type
+            // is wchar_t on Windows, so the c_str() form does not convert.
+            "Parent path: " + filePath.parent_path().string() +
             " exists: " + std::to_string(parentExists);
         if (parentExistsEC) {
           parentMsg +=
