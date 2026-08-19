@@ -364,6 +364,15 @@ struct CompilationTarget[value: _TargetType = _current_target()](
         """
         return Self._os() in ["darwin", "macosx"]
 
+    @staticmethod
+    def is_windows() -> Bool:
+        """Returns True if the host operating system is Windows.
+
+        Returns:
+            True if the host operating system is Windows and False otherwise.
+        """
+        return Self._os() == "windows"
+
 
 def platform_map[
     T: Copyable,
@@ -372,6 +381,7 @@ def platform_map[
     *,
     linux: Optional[T] = None,
     macos: Optional[T] = None,
+    windows: Optional[T] = None,
 ]() -> T:
     """Helper for defining a compile time value depending
     on the current compilation target, raising a compilation
@@ -382,6 +392,7 @@ def platform_map[
         operation: Optional operation name for error messages.
         linux: The value to use on Linux platforms.
         macos: The value to use on macOS platforms.
+        windows: The value to use on Windows platforms.
 
     Returns:
         The platform-specific value for the current target.
@@ -399,6 +410,8 @@ def platform_map[
         return materialize[macos.value()]()
     elif CompilationTarget.is_linux() and linux:
         return materialize[linux.value()]()
+    elif CompilationTarget.is_windows() and windows:
+        return materialize[windows.value()]()
     else:
         CompilationTarget.unsupported_target_error[operation=operation]()
 
