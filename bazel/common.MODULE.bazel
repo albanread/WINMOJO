@@ -102,6 +102,12 @@ single_version_override(
         "//bazel/public-patches:rules_pycross_exports.patch",
         # TODO: Remove when 3.8 is no longer pulled in transitively
         "//bazel/public-patches:rules_pycross_versions.patch",
+        # install_venv_wheels passes `environment` to rctx.execute, which
+        # replaces the environment rather than extending it. On Windows that
+        # drops SystemRoot, without which Winsock cannot load its service
+        # providers, so pip dies importing asyncio with WinError 10106 and
+        # every wheel install fails.
+        "//bazel/public-patches:rules_pycross-windows-env.patch",
     ],
 )
 

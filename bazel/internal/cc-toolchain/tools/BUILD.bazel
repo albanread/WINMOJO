@@ -95,6 +95,12 @@ builtin_module_map(
             "@clang-macos//:include_dir",
             "@sysroot-macos//sysroot:root",
         ],
+        # No sysroot directory to pair with the clang builtin headers here: the
+        # MSVC and SDK include paths arrive as -isystem flags from
+        # windows_sysroot_repository rather than as a directory tree.
+        "//:windows_arm64": [
+            "@clang-windows-arm64//:include_dir",
+        ],
     }),
     tags = ["manual"],
 )
