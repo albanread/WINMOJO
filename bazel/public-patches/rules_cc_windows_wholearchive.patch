@@ -1,0 +1,99 @@
+diff -ru a/cc/toolchains/args/libraries_to_link/BUILD b/cc/toolchains/args/libraries_to_link/BUILD
+--- a/cc/toolchains/args/libraries_to_link/BUILD	2026-08-19 18:20:29.519368800 +0100
++++ b/cc/toolchains/args/libraries_to_link/BUILD	2026-08-19 18:20:29.727381100 +0100
+@@ -108,7 +108,12 @@
+ 
+ cc_nested_args(
+     name = "whole_archive_start_arg",
+-    args = ["-Wl,-whole-archive"],
++    # lld-link has no bracketing whole-archive switches; on Windows the
++    # library argument itself is spelled -Wl,/wholearchive:<lib> instead.
++    args = select({
++        "@platforms//os:windows": [],
++        "//conditions:default": ["-Wl,-whole-archive"],
++    }),
+     requires_equal = "//cc/toolchains/variables:libraries_to_link.type",
+     requires_equal_value = "static_library",
+ )
+@@ -121,7 +126,10 @@
+ 
+ cc_nested_args(
+     name = "whole_archive_end_arg",
+-    args = ["-Wl,-no-whole-archive"],
++    args = select({
++        "@platforms//os:windows": [],
++        "//conditions:default": ["-Wl,-no-whole-archive"],
++    }),
+     requires_equal = "//cc/toolchains/variables:libraries_to_link.type",
+     requires_equal_value = "static_library",
+ )
+diff -ru a/cc/toolchains/args/libraries_to_link/private/library_link_args.bzl b/cc/toolchains/args/libraries_to_link/private/library_link_args.bzl
+--- a/cc/toolchains/args/libraries_to_link/private/library_link_args.bzl	2026-08-19 18:20:29.618094200 +0100
++++ b/cc/toolchains/args/libraries_to_link/private/library_link_args.bzl	2026-08-19 18:20:29.727381100 +0100
+@@ -49,6 +49,43 @@
+         },
+     )
+ 
++def windows_wholearchive_library_args(name, variable):
++    """Declares /wholearchive: argument expansion for a library on Windows.
++
++    lld-link has no --whole-archive/--no-whole-archive bracketing switches;
++    the per-file spelling /wholearchive:<library> is the COFF equivalent, so
++    the library expands to -Wl,/wholearchive:<library> when it must be linked
++    as a whole archive and to its bare path otherwise. This mirrors the
++    Apple -force_load mechanism above.
++
++    Args:
++      name: The name of the rule.
++      variable: The variable to expand.
++    """
++    cc_nested_args(
++        name = name,
++        nested = [
++            ":{}_wholearchive_library".format(name),
++            ":{}_no_wholearchive_library".format(name),
++        ],
++    )
++    cc_nested_args(
++        name = name + "_no_wholearchive_library",
++        requires_false = "//cc/toolchains/variables:libraries_to_link.is_whole_archive",
++        args = ["{library}"],
++        format = {
++            "library": variable,
++        },
++    )
++    cc_nested_args(
++        name = name + "_wholearchive_library",
++        requires_true = "//cc/toolchains/variables:libraries_to_link.is_whole_archive",
++        args = ["-Wl,/wholearchive:{library}"],
++        format = {
++            "library": variable,
++        },
++    )
++
+ def library_link_args(name, library_type, from_variable, iterate_over_variable = False):
+     """A helper for declaring a library to link.
+ 
+@@ -78,6 +115,7 @@
+         name = name,
+         actual = select({
+             "//cc/settings:apple_constraint": ":apple_{}".format(name),
++            "@platforms//os:windows": ":windows_{}".format(name),
+             "//conditions:default": ":generic_{}".format(name),
+         }),
+     )
+@@ -102,3 +140,14 @@
+         name = "{}_maybe_force_load".format(name),
+         variable = from_variable,
+     )
++    cc_nested_args(
++        name = "windows_{}".format(name),
++        requires_equal = "//cc/toolchains/variables:libraries_to_link.type",
++        requires_equal_value = library_type,
++        iterate_over = from_variable if iterate_over_variable else None,
++        nested = [":{}_maybe_wholearchive".format(name)],
++    )
++    windows_wholearchive_library_args(
++        name = "{}_maybe_wholearchive".format(name),
++        variable = from_variable,
++    )

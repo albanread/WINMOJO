@@ -1,6 +1,16 @@
 # Used internally by lit
 config.target_triple = "@TARGET_TRIPLE@"
-config.llvm_tools_dir = "../+llvm_configure+llvm-project/llvm"
+
+# FileCheck, not and count live in the llvm-project external repo inside the
+# test's runfiles. The old "../" spelling relied on the working directory
+# being the runfiles _main directory, which does not hold on Windows, where
+# python tests run out of an extracted runfiles zip. TEST_SRCDIR is the
+# absolute runfiles root on every platform; the ".." fallback preserves the
+# old behavior for any non-test consumer of this configuration.
+import os as _os
+config.llvm_tools_dir = _os.path.join(
+    _os.environ.get("TEST_SRCDIR", ".."), "+llvm_configure+llvm-project", "llvm"
+)
 
 config.llvm_use_sanitizer = "@LLVM_USE_SANITIZER@"
 if @ENABLE_ASSERTIONS@:

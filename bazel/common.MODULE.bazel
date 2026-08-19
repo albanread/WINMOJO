@@ -40,6 +40,16 @@ bazel_dep(name = "buildifier_prebuilt", version = "8.2.1", dev_dependency = True
 archive_override(
     module_name = "rules_cc",
     integrity = "sha256-xPt/jPo70Y+LPhowjcTLhMxwtkZtw7QBwO969n7mWPo=",
+    patch_strip = 1,
+    patches = [
+        # alwayslink emits GNU --whole-archive brackets, which lld-link
+        # ignores with a warning, so every static-initializer registration
+        # (target lowerings, dialects, runtool) silently vanished from
+        # Windows links. The COFF spelling is /wholearchive:<lib> on the
+        # library argument itself; the patch mirrors rules_cc's own Apple
+        # -force_load mechanism.
+        "//bazel/public-patches:rules_cc_windows_wholearchive.patch",
+    ],
     strip_prefix = "rules_cc-ad214a9cb17d41e4e03199d61d436974a2261885",
     urls = [
         "https://github.com/bazelbuild/rules_cc/archive/ad214a9cb17d41e4e03199d61d436974a2261885.tar.gz",

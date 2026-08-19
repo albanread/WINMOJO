@@ -283,6 +283,13 @@ cc_args(
             "-Wl,/DEFAULTLIB:msvcprt.lib",
             "-Wl,/DEFAULTLIB:ucrt.lib",
             "-Wl,/DEFAULTLIB:vcruntime.lib",
+            # getBinaryID() is PE's answer to the ELF build-id note: the
+            # CodeView RSDS GUID. Links carry no debug directory by default,
+            # so every `mojo build` died with "No build id note found" when
+            # it fingerprinted itself for MEF cache invalidation. /BUILD-ID
+            # writes a content-hash RSDS record without producing a PDB —
+            # this is Linux's --build-id=md5 line above, in COFF spelling.
+            "-Wl,/BUILD-ID",
         ],
     }) + select({
         # Sanitizers are split across multiple libraries, some of which aren't linked to shared libraries
