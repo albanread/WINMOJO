@@ -155,3 +155,48 @@ a struct layout taken from the wrong header does not fail, it lies.
 D1b — reachability is not execution. Get a checkable numerical result out of
 each surface: a real OpenCL kernel on the QUALCOMM platform, a Vulkan compute
 dispatch, and a trivial QNN graph on HTP V81.
+
+---
+
+## 2026-08-19 — re-verified the closed-engine claim under challenge
+
+Pushed back on: isn't MAX open, under a community license? Worth re-checking,
+and the wording in D0 was sloppy. Two separate questions had been blurred.
+
+**On licensing, the challenge is correct.** MAX is openly licensed. Published
+tree is Apache-2.0 with LLVM exceptions; usage and distribution fall under the
+Modular Community License, which is permissive for most purposes. Licensing is
+*not* what blocks this port, and D0 implied otherwise by lumping them together.
+
+**On source availability, the original finding survives, with better evidence.**
+
+The decisive artifact is `max/python/max/_core/BUILD.bazel`, which names its own
+sources:
+
+```python
+srcs = ["//max/python/max/_core/internal:_core.cpp"],
+deps = ["//max/python/max/_core/internal:AsyncRTPython",
+        "//max/python/max/_core/internal/modules"]
+```
+
+`max/python/max/_core/internal/` **does not exist in the repo and never appears
+in its git history.** `git log --all -- <path>` returns nothing; `git ls-files`
+under `_core/` lists `.pyi` and nothing else. The BUILD file is the public
+residue of an internal monorepo where that directory does exist. The interface
+was published; the implementation was stripped at export.
+
+Same for the device runtime, checked more widely than in D0: `AsyncRT_DeviceContext`
+across the **whole tree** in any `.c/.cpp/.h/.hpp/.cc` file returns **zero
+hits**. Every hit is `.mojo`, and every one is a declaration —
+`device_context.mojo`, `device_graph.mojo`, `_nvidia_cuda.mojo`,
+`_amdgpu_hip.mojo`, `_metal.mojo`, `_metal_capture.mojo`. The per-vendor files
+turn out to be bindings as well; `_nvidia_cuda.mojo` is five `external_call`s
+and some opaque structs, not a CUDA driver.
+
+And the fallback of using a prebuilt engine does not exist here either:
+upstream `MODULE.bazel` at `f66d4d5` mentions Windows **zero** times. Every
+Windows reference in this tree is WINMOJO's own G2 work.
+
+**Corrected framing, now used in the docs: source-available, not
+source-complete.** The unpublished parts happen to be exactly the two a new
+hardware backend would need. The ladder is unchanged.
