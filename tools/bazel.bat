@@ -80,6 +80,12 @@ REM overridden by them.
   echo build --spawn_strategy=remote,worker,standalone
   echo build --strategy=TestRunner=remote,worker,standalone
   echo build --experimental_output_paths=off
+  echo # PE/COFF has no rpath: a DLL is found through the executable's directory
+  echo # and the search path. Bazel's runtime_library_search_directories feature
+  echo # emits -Wl,-rpath,$ORIGIN/... regardless, which lld-link reads as a
+  echo # filename. The feature is neither overridable nor separately disableable
+  echo # in the toolchain, so it is switched off by name here.
+  echo build --features=-runtime_library_search_directories
   echo import %%workspace%%/build/local-resources.bazelrc
 )
 

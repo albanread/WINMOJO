@@ -18,17 +18,6 @@ package(default_visibility = ["//visibility:public"])
 # generator compiles with nearly 190 arguments of long Bazel output paths, which
 # overruns that limit. Link actions solve the same problem by binding clang++
 # directly instead.
-# Overrides Bazel's own feature, which emits -Wl,-rpath,$ORIGIN/... so a binary
-# can find its shared libraries in runfiles. PE/COFF has no rpath: a DLL is
-# located through the executable's directory and the search path, so lld-link
-# treats the argument as a file and fails with "could not open
-# '$ORIGIN/driver-tblgen.exe.runfiles/...'". Overriding with no args disables it
-# without disturbing the other platforms.
-cc_feature(
-    name = "no_runtime_library_search_directories",
-    feature_name = "runtime_library_search_directories",
-    overrides = "@rules_cc//cc/toolchains/features/legacy:runtime_library_search_directories",
-)
 
 cc_feature(
     name = "compiler_param_file",

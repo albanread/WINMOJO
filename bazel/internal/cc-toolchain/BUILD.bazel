@@ -105,7 +105,6 @@ cc_sysroot(
             # like.
             "@platforms//os:windows": [
                 "//bazel/internal/cc-toolchain/features:compiler_param_file",
-                "//bazel/internal/cc-toolchain/features:no_runtime_library_search_directories",
                 "@rules_cc//cc/toolchains/features/legacy:linker_param_file",
             ],
             "//conditions:default": [],
