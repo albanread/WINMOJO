@@ -214,7 +214,7 @@ static ErrorOr<bool> isExistingDirectory(const std::filesystem::path &path) {
   if (ec)
     return Error(
         llvm::formatv("could not determine if output path '{0}' exists: {1}",
-                      path, ec.message()));
+                      path.string(), ec.message()));
   if (!exists)
     return false;
 

@@ -16,6 +16,10 @@
 
 #include "Support/LLVMCompilerForwardDecls.h"
 
+// mangleParameterValues returns a std::string. That came in transitively via
+// the forward-decl header on other standard libraries.
+#include <string>
+
 namespace M::KGEN {
 class GeneratorOpInterface;
 
