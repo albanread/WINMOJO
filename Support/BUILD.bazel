@@ -87,13 +87,32 @@ modular_cc_library(
         "include/Support/STLExtras.h",
         "include/Support/StringExtras.h",
     ],
-    local_defines = [
-        "SHARED_LIBRARY_PREFIX='\"lib\"'",
-        "STATIC_LIBRARY_PREFIX='\"lib\"'",
-        "STATIC_LIBRARY_SUFFIX='\".a\"'",
-    ] + select({
-        "@platforms//os:macos": ["SHARED_LIBRARY_SUFFIX='\".dylib\"'"],
-        "@platforms//os:linux": ["SHARED_LIBRARY_SUFFIX='\".so\"'"],
+    # PE/COFF uses no "lib" prefix and different suffixes, so the whole set is
+    # platform-dependent here rather than only the shared-library suffix. These
+    # must agree with the artifact_name_patterns the Windows toolchain declares,
+    # or runtime library lookups will build names that were never produced.
+    # Flattened rather than nested: _process_defines parses selects with
+    # with_cfg.bzl's decompose_select_elements, which cannot handle a select
+    # inside a select value.
+    local_defines = select({
+        "@platforms//os:macos": [
+            "SHARED_LIBRARY_PREFIX='\"lib\"'",
+            "STATIC_LIBRARY_PREFIX='\"lib\"'",
+            "STATIC_LIBRARY_SUFFIX='\".a\"'",
+            "SHARED_LIBRARY_SUFFIX='\".dylib\"'",
+        ],
+        "@platforms//os:linux": [
+            "SHARED_LIBRARY_PREFIX='\"lib\"'",
+            "STATIC_LIBRARY_PREFIX='\"lib\"'",
+            "STATIC_LIBRARY_SUFFIX='\".a\"'",
+            "SHARED_LIBRARY_SUFFIX='\".so\"'",
+        ],
+        "@platforms//os:windows": [
+            "SHARED_LIBRARY_PREFIX='\"\"'",
+            "STATIC_LIBRARY_PREFIX='\"\"'",
+            "STATIC_LIBRARY_SUFFIX='\".lib\"'",
+            "SHARED_LIBRARY_SUFFIX='\".dll\"'",
+        ],
     }),
     deps = [
         ":ConcurrentAppendingVector",
@@ -1093,6 +1112,13 @@ modular_shared_library(
         "@platforms//os:macos": [
             "-Wl,-u,__ZN4mlir6detail22FallbackTypeIDResolver22registerImplicitTypeIDEN4llvm9StringRefE",
         ],
+        # The symbol above is Itanium-mangled and simply does not exist under
+        # the MSVC ABI, so lld-link's /INCLUDE: would need the MSVC-mangled
+        # spelling instead. Forcing it only matters when MLIR types have to be
+        # matched across separate shared objects; mojo.exe is linked as one
+        # static binary, so nothing needs the reference kept alive. This has to
+        # be revisited before building Mojo as DLLs on Windows.
+        "@platforms//os:windows": [],
     }),
     output_name = "MSupportGlobals",
     deps = [

@@ -165,6 +165,14 @@ mojo_copts_toolchain(
         "@platforms//os:macos": [
             "--target-cpu=apple-m1",
         ],
+        # No --target-cpu: the other platforms pin one because their hardware is
+        # known, whereas Windows ARM64 spans several Snapdragon generations and
+        # LLVM's names for them move between releases. The triple is the part
+        # that has to be right; letting the backend pick the baseline CPU is
+        # safer than naming one that may not exist in this LLVM.
+        "//:windows_arm64": [
+            "-target-triple=aarch64-pc-windows-msvc",
+        ],
     }) + select({
         "//:asan": ["--sanitize=address"],
         "//:tsan": ["--sanitize=thread"],
@@ -237,6 +245,10 @@ alias(
         "@platforms//os:macos": "@gperftools-macos//:tcmalloc",
         # NOTE: This library doesn't override new/free globally, which the default library does
         "@platforms//os:linux": "@tcmalloc//tcmalloc:tcmalloc_internal_methods_only_numa_aware",
+        # Neither tcmalloc nor gperftools supports Windows, so the process keeps
+        # the system allocator. That is a performance choice, not a correctness
+        # one, and is worth revisiting if allocation shows up in a profile.
+        "@platforms//os:windows": ":empty_lib",
     }),
 )
 
@@ -248,6 +260,8 @@ alias(
     actual = select({
         "@platforms//os:macos": ":empty_lib",
         "@platforms//os:linux": "@tcmalloc//tcmalloc:want_numa_aware",
+        # No tcmalloc on Windows, so there is no weak symbol to override.
+        "@platforms//os:windows": ":empty_lib",
     }),
 )
 
