@@ -320,3 +320,91 @@ shell per session. PowerShell + `bazelw.cmd` is the better default, since it als
 avoids the `//`-label mangling.
 
 **Next: G3** — fetch the clang archive and put real C++ through the toolchain.
+
+---
+
+## G3 — First contact with the toolchain (2026-08-19)
+
+The 737 MB clang archive downloaded and extracted in 118 s. A smoke `cc_binary`
+was added at `bazel/internal/cc-toolchain/smoke` — deliberately plain
+`rules_cc` rather than the `modular_*` macros, so a failure there is
+unambiguously a toolchain problem rather than a repo-convention one.
+
+Five blockers hit in sequence. Four are fixed; the fifth is open.
+
+### Fixed
+
+1. **`clang.BUILD` does not fit the Windows distribution.** compiler-rt is
+   `clang_rt.*` with no `lib` prefix under `lib/clang/22/lib/windows`, there is
+   no `lib/clang/22/share`, and everything is `.exe`. Added
+   `bazel/public-patches/clang-windows.BUILD` rather than relaxing the shared
+   globs, so a genuinely missing file on Linux or macOS still fails loudly.
+
+2. **Six selects in `args/BUILD.bazel` had no default**, covering only linux and
+   macos, so each failed analysis on Windows. Each now has an explicit Windows
+   branch, and the target triple moved into the existing `compile_and_link_args`
+   select instead of a bespoke `cc_args` target.
+
+3. **Two flags are actively wrong, not merely redundant.** `-fPIC` is rejected as
+   unused for PE/COFF, and `-Werror=unused-command-line-argument` promotes that
+   to a hard error. `-fno-autolink` suppresses the `#pragma comment(lib, ...)`
+   directives in the MSVC headers, which is precisely the mechanism that selects
+   a CRT variant matching the compilation mode — so it is dropped on Windows
+   rather than pinning CRT libraries by hand.
+
+4. **No `sandboxed` strategy exists on Windows**, and naming one is a hard error
+   rather than a fallback. Added a `build:windows` section; the repo already sets
+   `--enable_platform_specific_config`.
+
+Also fixed `tools/bazel.bat`: cmd's `for` treats `=` as a delimiter, so
+`--config=build-mojo` was silently split in two and never matched.
+
+### Open blocker: no Windows ARM64 Python below 3.11
+
+```
+rules_python:python WARNING: No host compatible runtime found compatible with version 3.10
+Error in fail: Unable to find interpreter for pip hub 'grpc_python_dependencies'
+for python_version=3.9 ... Expected to find python_3_9_host among registered versions:
+  python_3_11_host python_3_12_host python_3_13_host python_3_14_host
+```
+
+`PYTHON_VERSIONS` lists `3_10` through `3_14`, but only 3.11+ ever register on
+this host: **rules_python publishes no `aarch64-pc-windows-msvc` interpreter for
+3.9 or 3.10.** Adding `3_9` to the list was tried and reverted — it changes
+nothing but the warning text, which confirms the gap rather than closing it.
+
+`grpc` demands a 3.9 interpreter for its `grpc_python_dependencies` pip hub, and
+toolchain resolution evaluates that extension even for a pure C++ target.
+
+Scoping the mypy aspect to linux and macos (below) moved the failure from
+"Analysis of aspects" to the target itself, which proves the aspect was one
+route in but not the only one.
+
+Candidate fixes, cheapest first:
+
+- **Exclude grpc.** It is almost certainly a MAX serving dependency, and MAX is
+  already out of scope. If nothing in the KGEN graph needs it, the cleanest fix
+  is for it not to be in the graph at all.
+- Override grpc's `python_version` to something with a win-arm64 runtime.
+- Supply a local 3.9 via `local_runtime` rather than a hermetic download.
+
+The first is most in keeping with the port's scope, and should be tried first.
+
+### Note on the mypy aspect
+
+`build --aspects=//bazel/pip:mypy.bzl%mypy_aspect` was applied unconditionally,
+so it attached to C++ targets too. `--aspects` accumulates, so neither
+`--aspects=` nor a `build:windows` section can clear it — it has to not be added
+in the first place. It is now scoped to `build:linux` and `build:macos`. Python
+linting has no bearing on porting a C++ compiler.
+
+### Repository state
+
+The fork now has a real remote: `origin` =
+`github.com/albanread/WINMOJO.git`, with `upstream` = `modular/modular`.
+
+The first push was rejected — `did not receive expected object` — because the
+working copy was a `--depth 1` clone and the pack was incomplete without the
+base commit's ancestors. `git fetch --unshallow upstream` fixed it: the history
+is now complete at 53,622 commits, which also makes future rebases onto upstream
+tractable.
