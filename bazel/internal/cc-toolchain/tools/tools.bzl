@@ -54,7 +54,7 @@ def _declare_windows_tools(platform):
             "@rules_cc//cc/toolchains/actions:assembly_actions": ":{}-clang".format(platform),
             "@rules_cc//cc/toolchains/actions:c_compile": ":{}-clang".format(platform),
             "@rules_cc//cc/toolchains/actions:cpp_compile_actions": ":{}-clang++".format(platform),
-            "@rules_cc//cc/toolchains/actions:link_actions": ":{}-clang++".format(platform),
+            "@rules_cc//cc/toolchains/actions:link_actions": ":{}-linker_driver".format(platform),
             "@rules_cc//cc/toolchains/actions:objcopy_embed_data": ":{}-llvm-objcopy".format(platform),
             "@rules_cc//cc/toolchains/actions:strip": ":{}-llvm-strip".format(platform),
         },
@@ -113,6 +113,22 @@ def _declare_windows_tools(platform):
         src = ":windows-clang++.bat",
         data = [
             "@clang-{}//:bin/clang++{}".format(platform, ext),
+            "@clang-{}//:bin/clang{}".format(platform, ext),
+            "@clang-{}//:ld".format(platform),
+        ],
+        tags = ["manual"],
+    )
+
+    # Linking binds clang++.exe directly rather than going through the .bat.
+    # cmd.exe truncates a command line at 8191 characters, well below the 32767
+    # that CreateProcess itself allows, and linking LLVM blows past that: the
+    # link of MSupportGlobals.dll failed with "The command line is too long".
+    # Only the header-parsing actions need the wrapper's PARSE_HEADER marker, so
+    # link actions have nothing to gain from it and everything to lose.
+    cc_tool(
+        name = "{}-linker_driver".format(platform),
+        src = "@clang-{}//:bin/clang++{}".format(platform, ext),
+        data = [
             "@clang-{}//:bin/clang{}".format(platform, ext),
             "@clang-{}//:ld".format(platform),
         ],

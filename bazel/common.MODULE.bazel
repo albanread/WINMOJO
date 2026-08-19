@@ -186,6 +186,9 @@ single_version_override(
     patch_strip = 1,
     patches = [
         "//bazel/public-patches:boringssl-clang-driver-flags.patch",
+        # HRSS's NEON vec_t is MSVC's __n128 union on Windows, so arithmetic on
+        # it does not compile.
+        "//bazel/public-patches:boringssl-hrss-windows-arm64.patch",
     ],
     version = "0.20241024.0",
 )
