@@ -44,8 +44,12 @@ std::map<uint64_t, ModuleInfo> gModules;
 std::wstring pathFromHandle(HANDLE file) {
   wchar_t buf[MAX_PATH * 2] = {};
   if (file &&
-      GetFinalPathNameByHandleW(file, buf, MAX_PATH * 2, FILE_NAME_NORMALIZED))
+      GetFinalPathNameByHandleW(file, buf, MAX_PATH * 2, FILE_NAME_NORMALIZED)) {
+    // dbghelp rejects the \?\ long-path prefix when resolving PDBs.
+    if (wcsncmp(buf, L"\\\\?\\", 4) == 0)
+      return buf + 4;
     return buf;
+  }
   return L"<unknown>";
 }
 
@@ -114,7 +118,9 @@ void printStack(HANDLE process, HANDLE thread) {
   // Return addresses in the records carry ARM64 pointer-authentication bits
   // in the top byte(s); user-space code addresses are canonical 48-bit, so
   // mask before use or every PAC-signed frame reads as garbage.
-  const uint64_t kVAMask = 0x0000FFFFFFFFFFFFull;
+  // Windows user-space VAs top out below 2^47, so the PAC field reaches
+  // down through bit 47.
+  const uint64_t kVAMask = 0x00007FFFFFFFFFFFull;
   printFrame(process, 0, ctx.Pc & kVAMask);
   int depth = 1;
   if (ctx.Lr && (ctx.Lr & kVAMask) != (ctx.Pc & kVAMask))
@@ -247,7 +253,15 @@ int wmain(int argc, wchar_t **argv) {
 
     switch (ev.dwDebugEventCode) {
     case CREATE_PROCESS_DEBUG_EVENT: {
-      symInitialized = SymInitializeW(pi.hProcess, nullptr, FALSE);
+      // The RSDS record in lld-link output names the PDB relative to the
+      // link's working directory, which is not ours; searching the image's
+      // own directory finds the PDB laid down beside it.
+      std::wstring exeDir = pathFromHandle(ev.u.CreateProcessInfo.hFile);
+      size_t slash = exeDir.find_last_of(L"\\/");
+      if (slash != std::wstring::npos)
+        exeDir.resize(slash);
+      symInitialized =
+          SymInitializeW(pi.hProcess, exeDir.c_str(), FALSE);
       uint64_t base = (uint64_t)ev.u.CreateProcessInfo.lpBaseOfImage;
       std::wstring path = pathFromHandle(ev.u.CreateProcessInfo.hFile);
       gModules[base] = {path, base};

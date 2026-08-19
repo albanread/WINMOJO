@@ -1058,3 +1058,49 @@ with a warning by lld-link, so constructor-driven objects like runtool ride on
 luck rather than /WHOLEARCHIVE; and clang appends the host's Visual Studio
 lib directories before ours, so the sysroot is only hermetic while the host
 SDK happens to match. Neither blocks the current gate.
+
+## One line, eight hours: free(workers)
+
+With the dynamic CRT in place the stdlib precompile still died at teardown,
+4 for 4, same two exit codes. The per-module-heap theory had been *a* real
+defect — the architecture genuinely requires one allocator per process — but
+it was not this crash. Time to stop reasoning and start observing.
+
+**Building the observer.** Nothing on this machine could see a fastfail: cdb
+is not installed, our LLVM build carries no lldb, crashpad has no Windows
+handler yet, and 0xC0000374/0xC0000409 bypass SEH by design — only a debugger
+receives them. The Win32 Debug API is always present, so the port now carries
+`tools/crashcatch`: three hundred lines that run a target under
+DEBUG_ONLY_THIS_PROCESS, pass first-chance exceptions through untouched, and
+on a fatal code print a stack walk and write a full-memory minidump. Two
+ARM64 details cost the most time. StackWalk64 without symbols loses the chain
+after one ntdll frame, so crashcatch walks AAPCS64 frame records by hand,
+possible because this tree builds with -fno-omit-frame-pointer. And the
+return addresses in those records carry pointer-authentication bits down
+through bit 47 — Windows user VAs stop below 2^47 — which must be masked or
+every second frame is garbage: 0xe4417ff7904b9888 is mojo.exe+0x3cc2c20
+wearing a hat.
+
+**Reading the answer.** lld-link relinked with /DEBUG:FULL produced a PDB,
+llvm-symbolizer turned RVAs into names, and the stack said everything:
+precompile → ~MLIRContext → M::Context refcount zero → CPUDevice::~CPUDevice
+→ WorkItem teardown → plain free() inside ucrtbase — `_free_base+0x28`, the
+crash RVA bracketed by ucrtbase's own export table — raising the failfast.
+
+**The bug.** ThreadPoolWorkQueue allocates its worker array with
+`M::alignedAlloc(alignof(WorkQueueThread), ...)` and its destructor released
+it with `free(workers)`. AlignedAlloc.h states the contract — "The returned
+pointer *must* be deallocated with alignedFree()" — and on POSIX breaking it
+costs nothing, because free() accepts aligned_alloc memory. On Windows
+alignedAlloc is _aligned_malloc, which returns an adjusted pointer that
+free() hands to HeapFree as garbage. Correct on Linux by coincidence, fatal
+on Windows by contract. A tree-wide audit of every alignedAlloc caller
+(AsyncValue, MallocAllocator, BytecodeInterpreter, STLExtras) found the
+pairing honored everywhere but this one line.
+
+The fix is `M::alignedFree(workers)`. The nondeterminism now reads plainly:
+whether HeapFree noticed the bad block immediately (0xC0000409), on a later
+validation pass (0xC0000374), or never (the single "successful" run that
+started this chapter) depended on what the adjusted pointer happened to point
+at. The output was always complete because the corruption lived entirely in
+process teardown, after the .mojoc was written and closed.

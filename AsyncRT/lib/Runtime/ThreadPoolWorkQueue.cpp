@@ -1028,7 +1028,12 @@ ThreadPoolWorkQueue::~ThreadPoolWorkQueue() {
   // Destroy all the threads datastructures.
   for (size_t i = 0; i < numWorkers; ++i)
     workers[i].~WorkQueueThread();
-  free(workers);
+  // The array comes from alignedAlloc, and alignedAlloc's contract requires
+  // alignedFree. On POSIX free() happens to accept aligned_alloc memory, so
+  // the mismatch was invisible there; on Windows the underlying
+  // _aligned_malloc returns an adjusted pointer that free() rejects, which
+  // surfaced as 0xC0000374/0xC0000409 at every process teardown.
+  M::alignedFree(workers);
 }
 
 void ThreadPoolWorkQueue::shutdown() {
