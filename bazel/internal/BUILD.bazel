@@ -165,13 +165,19 @@ mojo_copts_toolchain(
         "@platforms//os:macos": [
             "--target-cpu=apple-m1",
         ],
-        # No --target-cpu: the other platforms pin one because their hardware is
-        # known, whereas Windows ARM64 spans several Snapdragon generations and
-        # LLVM's names for them move between releases. The triple is the part
-        # that has to be right; letting the backend pick the baseline CPU is
-        # safer than naming one that may not exist in this LLVM.
+        # --target-cpu is pinned after all. Left unset, Mojo detects the host
+        # CPU, which on a Snapdragon X reports oryon-1, and the LLVM built here
+        # rejects that with "unknown target CPU 'oryon-1'" even though the
+        # prebuilt clang 22.1.4 accepts it: the backend knows the processor but
+        # the TargetParser table this build produces does not.
+        #
+        # neoverse-n1 matches what linux_aarch64 uses and is a safe ARMv8.2
+        # baseline that every Windows ARM64 device supports. It does leave
+        # Oryon-specific instructions unused, so this is worth revisiting for
+        # performance once the CPU is recognised.
         "//:windows_arm64": [
             "-target-triple=aarch64-pc-windows-msvc",
+            "--target-cpu=neoverse-n1",
         ],
     }) + select({
         "//:asan": ["--sanitize=address"],
