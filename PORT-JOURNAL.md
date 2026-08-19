@@ -149,3 +149,78 @@ port.
 | G6 | `hello.mojo` compiles and runs natively on Windows ARM64 | Goal gate |
 
 G1's fix is cheap and testable. G3 is the long pole and cannot be deferred.
+
+---
+
+## G1 — Done. Bazel runs natively on Windows ARM64 (2026-08-19)
+
+**Result: `bazel query //KGEN:all` succeeds, exit 0, 617 targets enumerated,
+including `//KGEN:mojo`.** The whole bzlmod module graph resolves on Windows.
+No emulation anywhere in the chain.
+
+The BuildBuddy fork was **not** load-bearing. Repinning to upstream Bazel was
+sufficient, which confirms the G1 reading: their remote-cache plumbing is all
+behind optional configs.
+
+### The experiment
+
+Ran bazelisk against the **unmodified** pin first, to prove the diagnosis rather
+than assume it:
+
+```
+Downloading .../buildbuddy-io/bazel/releases/download/5.0.382/bazel-5.0.382-windows-arm64.exe...
+could not download Bazel: ... failed with error 404
+```
+
+Bazelisk itself is flawless on Windows ARM64 — it resolved the fork, built the
+correct URL, and asked for the right file. The file simply does not exist.
+Repinning to `9.2.0` then downloaded `bazel-9.2.0-windows-arm64.exe` and printed
+`bazel 9.2.0`.
+
+### Changes
+
+| File | Change |
+| --- | --- |
+| `.bazelversion` | `buildbuddy-io/5.0.382` -> `9.2.0`. Original preserved at `build/.bazelversion.upstream-orig`. |
+| `bazelw` | Added an `msys*`/`cygwin*` branch with `.exe` suffix handling and pinned bazelisk SHAs for both Windows arches. |
+| `bazelw.cmd` | New. Native entry point for cmd/PowerShell, no Git-Bash needed. |
+| `tools/bazel.bat` | New. Windows counterpart of `tools/bazel`. |
+
+bazelisk `windows-arm64` sha256
+`46d97f32458cd88dd4c2c6ad1c597e02d38ee3a1d07b07715c5a9e1b0c09a6dc`, verified
+equal to the digest GitHub publishes for the asset.
+
+### Three Windows traps, all real
+
+1. **Arch detection lies.** From Git-Bash on this ARM64 machine, `uname -m` says
+   `x86_64` and `$PROCESSOR_ARCHITECTURE` says `AMD64` — Git-Bash is itself an
+   x86-emulated process. Only `uname -s` carries the truth
+   (`MINGW64_NT-10.0-26200-ARM64`). `bazelw` now keys off `uname -s` and
+   explicitly does not trust `$arch`. Native cmd reports `ARM64` correctly, so
+   `bazelw.cmd` can use `%PROCESSOR_ARCHITECTURE%`.
+
+2. **The wrapper must be `tools/bazel.bat`, not `.cmd`.** Determined
+   empirically: with `tools/bazel.cmd` in place bazelisk silently ignored it and
+   ran Bazel directly, so `build/wrapper.bazelrc` was never generated and
+   `.bazelrc`'s hard `import` of it aborted the build. Renaming to `.bat` made
+   bazelisk delegate immediately. A silent non-delegation is a nasty failure
+   mode — it looks like an unrelated rc-file error.
+
+3. **Git-Bash mangles Bazel labels.** `./bazelw query '//KGEN:all'` fails with
+   `invalid package name '/KGEN'` because MSYS path conversion rewrites `//...`
+   into a Windows path. Use `MSYS_NO_PATHCONV=1` (verified working) or drive it
+   from PowerShell via `bazelw.cmd`.
+
+### Notes for later gates
+
+- `detect_local_resources.sh` is pure GPU detection and its `else` branch
+  assumes macOS, so it cannot run on Windows. Since GPU is out of scope,
+  `tools/bazel.bat` writes an empty `local-resources.bazelrc`, which is exactly
+  what a GPU-less Linux host produces.
+- `tools/bazel.bat` rejects `--config=prebuilt-mojo` with an explanatory message,
+  since that config cannot ever work on Windows.
+- `//KGEN:mojo` is an `alias` rule, so the real binary target needs resolving
+  before G4.
+
+**Next: G2** — the `windows_arm64` platform and an MSVC `cc_toolchain` in their
+custom `rules_cc` framework. Nothing further can build until that exists.
