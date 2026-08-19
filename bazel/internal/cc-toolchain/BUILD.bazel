@@ -212,8 +212,14 @@ cc_args(
         # undefined neon_xtn, neon_umov and similar. -resource-dir alone does
         # not fix this: clang searches its builtin include directory after
         # -isystem paths, not before.
+        # The trailing subpath is required: :include_dir is declared in the
+        # repository root BUILD file, and bazel_skylib's directory reports the
+        # path of its package rather than of its srcs, so the placeholder alone
+        # expands to the repository root and the builtin headers are not found.
+        # lib/clang/22 is already hardcoded in clang.BUILD, so this adds no new
+        # version coupling.
         "-isystem",
-        "{clang_include}",
+        "{clang_include}/lib/clang/22/include",
         "-isystem",
         "{vc_include}",
         "-isystem",
