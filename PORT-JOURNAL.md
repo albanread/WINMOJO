@@ -1195,3 +1195,37 @@ test passes — the last one meaning a test successfully ran `mojo` itself,
 with the whole SDK-configuration environment (import paths, shared library
 link arguments, CompilerRT path) working on Windows. The full census is
 running.
+
+## Debug mode was the slowness and half the failures
+
+The first full census ran in compilation_mode=dbg — not by choice, but
+because upstream's .bazelrc sets `build --compilation_mode=dbg` for every
+developer build. That default put a full-debug LLVM inside mojo.exe, which
+made each test's compile step crawl, and it put LLVM's assertions in the
+JIT's codegen path, which turned out to be causing failures of its own.
+
+The abort-message tests (test_span_bounds_abort and friends) were failing
+with the expected "Assert Error:" line absent from stderr. Reproducing by
+hand showed why: under `mojo run`, LLVM died on
+`UNREACHABLE executed at llvm/lib/CodeGen/TargetSchedule.cpp:227` —
+"incomplete machine model" — validating a load-pair instruction against the
+neoverse-n1 scheduling model. An assertions-only check: the compiler
+aborted before the test program executed a single instruction. In a release
+LLVM the check does not exist.
+
+So the census moved to release mode: a `local.bazelrc` (gitignored by
+upstream's design, hence recorded here rather than committed) sets
+`--compilation_mode=opt` and `--config=build-mojo` for every invocation on
+this machine. One full opt rebuild of the C++ tree buys a compiler that
+tests at proper speed and a census unpolluted by debug-only assertions.
+Interim numbers from the abandoned dbg run, for the record: 47 of 366
+executed, 21 passing, 26 failing — most failures of the scheduler-assertion
+class, plus a `-Xlinker argument has no effect on mojo run` warning that
+pollutes FileCheck's input on JIT-mode tests (a side effect of the test
+environment handing link arguments to a run invocation; to be gated to
+build-mode tests).
+
+Also observed in passing: with crash reporting enabled, every mojo
+invocation now warns "unable to locate crashpad handler executable" — the
+client half of crashpad is ported, the handler binary is not. It moves up
+the queue.
