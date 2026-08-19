@@ -55,6 +55,10 @@ PATCHES = [
     # is_windows_clang_mingw also matches a clang driver targeting the MSVC ABI,
     # and being more specialized it won the select and applied MinGW link flags.
     "//bazel/public-patches:llvm-mingw-setting-x86-only.patch",
+    # The is_windows_msvc branches use linker spellings, which the clang driver
+    # reads as input filenames.
+    "//bazel/public-patches:llvm-msvc-linkopts-driver-syntax.patch",
+    "//bazel/public-patches:llvm-clang-msvc-linkopts-driver-syntax.patch",
 ]
 
 def _llvm_source_impl(module_ctx):
