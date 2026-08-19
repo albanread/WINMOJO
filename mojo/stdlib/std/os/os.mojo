@@ -86,10 +86,39 @@ struct _dirent_macos(Copyable):
     """Name of entry."""
 
 
+struct _finddata_windows(Copyable, Defaultable):
+    """Mirrors the UCRT's `struct __finddata64_t`."""
+
+    comptime MAX_NAME_SIZE = 260
+    var attrib: UInt32
+    """File attribute bits."""
+    var time_create: Int64
+    """Creation time."""
+    var time_access: Int64
+    """Time of last access."""
+    var time_write: Int64
+    """Time of last write."""
+    var size: Int64
+    """File size in bytes."""
+    var name: Array[c_char, Self.MAX_NAME_SIZE]
+    """Null-terminated name of the entry."""
+
+    def __init__(out self):
+        self.attrib = 0
+        self.time_create = 0
+        self.time_access = 0
+        self.time_write = 0
+        self.size = 0
+        self.name = Array[c_char, Self.MAX_NAME_SIZE]()
+
+
 struct _DirHandle:
     """Handle to an open directory descriptor opened via opendir."""
 
-    var _handle: OpaquePointer[MutUntrackedOrigin]
+    var _handle: OptionalPointer[NoneType, MutUntrackedOrigin]
+    """Absent on Windows, which has no opendir equivalent to hold open."""
+    var _path: String
+    """Only used on Windows, whose directory API is opened per-listing."""
 
     def __init__(out self, var path: String) raises:
         """Construct the _DirHandle using the path provided.
@@ -100,6 +129,15 @@ struct _DirHandle:
         if not isdir(path):
             raise Error("the directory '", path, "' does not exist")
 
+        comptime if CompilationTarget.is_windows():
+            # There is no opendir. _findfirst64 both opens the search and
+            # yields the first entry, so it cannot be split across
+            # construction and iteration; the listing does all of it.
+            self._path = path^
+            self._handle = OptionalPointer[NoneType, MutUntrackedOrigin]()
+            return
+
+        self._path = String()
         var handle = external_call[
             "opendir", OptionalPointer[NoneType, UntrackedOrigin[mut=True]]
         ](path.as_c_string_slice())
@@ -114,11 +152,13 @@ struct _DirHandle:
                 String(err),
             )
 
-        self._handle = handle.value()
+        self._handle = handle
 
     def __deinit__(deinit self):
         """Closes the handle opened via popen."""
-        _ = external_call["closedir", Int32](self._handle)
+        comptime if CompilationTarget.is_windows():
+            return
+        _ = external_call["closedir", Int32](self._handle.value())
 
     def list(self) -> List[String]:
         """Reads all the data from the handle.
@@ -127,10 +167,50 @@ struct _DirHandle:
           A string containing the output of running the command.
         """
 
-        comptime if CompilationTarget.is_linux():
+        comptime if CompilationTarget.is_windows():
+            return self._list_windows()
+        elif CompilationTarget.is_linux():
             return self._list_linux()
         else:
             return self._list_macos()
+
+    def _list_windows(self) -> List[String]:
+        """Enumerates the directory with the UCRT's find API.
+
+        Unlike readdir, _findfirst64 takes a wildcard pattern rather than a
+        directory and returns the first match together with the handle, so
+        the loop is do-while shaped rather than while shaped.
+        """
+        var res = List[String]()
+        var data = _finddata_windows()
+
+        var pattern = self._path + "/*"
+        var handle = external_call["_findfirst64", Int](
+            pattern.as_c_string_slice(), Pointer(to=data)
+        )
+        if handle == -1:
+            return res^
+
+        while True:
+            var name_ptr = data.name.unsafe_ptr().unsafe_bitcast[Byte]()
+            var name_str = StringSlice[origin_of(data.name)](
+                unsafe_from_utf8=Span[Byte, origin_of(data.name)](
+                    unsafe_ptr=name_ptr,
+                    length=Int(
+                        _unsafe_strlen(
+                            name_ptr, _finddata_windows.MAX_NAME_SIZE
+                        )
+                    ),
+                )
+            )
+            if name_str != "." and name_str != "..":
+                res.append(String(name_str))
+
+            if external_call["_findnext64", Int32](handle, Pointer(to=data)) != 0:
+                break
+
+        _ = external_call["_findclose", Int32](handle)
+        return res^
 
     def _list_linux(self) -> List[String]:
         """Reads all the data from the handle.
@@ -143,7 +223,7 @@ struct _DirHandle:
         while True:
             var ep = external_call[
                 "readdir", OptionalPointer[_dirent_linux, MutUntrackedOrigin]
-            ](self._handle)
+            ](self._handle.value())
             if not ep:
                 break
             ref name = ep.unsafe_value().unsafe_take_pointee().name
@@ -173,7 +253,7 @@ struct _DirHandle:
         while True:
             var ep = external_call[
                 "readdir", OptionalPointer[_dirent_macos, MutUntrackedOrigin]
-            ](self._handle)
+            ](self._handle.value())
             if not ep:
                 break
             ref name = ep.unsafe_value().unsafe_take_pointee().name

@@ -39,12 +39,28 @@ def setenv(var name: String, var value: String, overwrite: Bool = True) -> Bool:
       False if the name is empty or contains an `=` character. In any other
       case, True is returned.
     """
-    var status = external_call["setenv", Int32](
-        name.as_c_string_slice(),
-        value.as_c_string_slice(),
-        Int32(1 if overwrite else 0),
-    )
-    return status == 0
+    comptime if CompilationTarget.is_windows():
+        # The UCRT has no setenv. _putenv_s is its equivalent but always
+        # overwrites, so the overwrite=False case has to look first.
+        if not overwrite:
+            var existing = external_call[
+                "getenv", OptionalPointer[UInt8, ImmUntrackedOrigin]
+            ](name.as_c_string_slice())
+            if existing:
+                return True
+        return (
+            external_call["_putenv_s", c_int](
+                name.as_c_string_slice(), value.as_c_string_slice()
+            )
+            == 0
+        )
+    else:
+        var status = external_call["setenv", Int32](
+            name.as_c_string_slice(),
+            value.as_c_string_slice(),
+            Int32(1 if overwrite else 0),
+        )
+        return status == 0
 
 
 def unsetenv(var name: String) -> Bool:
@@ -56,7 +72,17 @@ def unsetenv(var name: String) -> Bool:
     Returns:
         True if unsetting the variable succeeded. Otherwise, False is returned.
     """
-    return external_call["unsetenv", c_int](name.as_c_string_slice()) == 0
+    comptime if CompilationTarget.is_windows():
+        # Assigning an empty value is how the CRT removes a variable.
+        var empty = String()
+        return (
+            external_call["_putenv_s", c_int](
+                name.as_c_string_slice(), empty.as_c_string_slice()
+            )
+            == 0
+        )
+    else:
+        return external_call["unsetenv", c_int](name.as_c_string_slice()) == 0
 
 
 def getenv(var name: String, default: String = "") -> String:
