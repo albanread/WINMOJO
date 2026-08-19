@@ -142,6 +142,18 @@ single_version_override(
     version = "1.76.0.bcr.1",
 )
 
+# protoc-gen-validate copies grpc's Python block verbatim, so it needs the same
+# treatment for the same reason: no aarch64-pc-windows-msvc runtime exists below
+# 3.11, and its pgv_pip_deps hub cannot resolve a 3.9 interpreter.
+single_version_override(
+    module_name = "protoc-gen-validate",
+    patch_strip = 1,
+    patches = [
+        "//bazel/public-patches:pgv-python-versions.patch",
+    ],
+    version = "1.2.1.bcr.2",
+)
+
 # Expose the :toml++-src target (header-only impl) to external repos
 # (consumed by @nixl_upstream). The BCR patch creates the target but leaves
 # its visibility restricted.

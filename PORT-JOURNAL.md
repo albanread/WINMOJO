@@ -398,6 +398,66 @@ so it attached to C++ targets too. `--aspects` accumulates, so neither
 in the first place. It is now scoped to `build:linux` and `build:macos`. Python
 linting has no bearing on porting a C++ compiler.
 
+### Python versions: fixed by patching the modules that ask for 3.9
+
+The 3.9 problem was not grpc-specific. `grpc` and `protoc-gen-validate` both
+declare `PYTHON_VERSIONS = ["3.9" ... "3.13"]` and create a toolchain and a pip
+hub per version — pgv copies grpc's block verbatim. Both are patched to start
+at 3.11, using the `single_version_override` patches list Modular already
+maintain for grpc, which is also where they already strip macOS x86
+special-casing. So this follows an established mechanism rather than adding one.
+
+Worth recording: **MODULE.bazel patches do take effect during bzlmod
+resolution**, which was not obvious beforehand and is what makes this approach
+viable at all.
+
+Note this is *not* about compiling grpc. Nothing grpc-related is compiled; the
+failure is in dependency resolution, and it blocks even a plain `cc_binary`
+because toolchain resolution evaluates the pip extension regardless of what is
+being built.
+
+### Open blocker: Winsock fails inside repository rules
+
+```
+File ".../python_3_12_host/Lib/asyncio/windows_events.py", line 8, in <module>
+  import _overlapped
+OSError: [WinError 10106] The requested service provider could not be loaded or initialized
+```
+
+`rules_pycross` runs pip to install a wheel, pip imports `tenacity`, which
+imports `asyncio`, which on Windows imports `_overlapped`, which initialises
+Winsock. `WinError 10106` is `WSAEPROVIDERFAILEDINIT`.
+
+What has been ruled out:
+
+- **Not a broken interpreter.** Running that exact `python.exe` directly outside
+  Bazel, `import _overlapped` succeeds. The interpreter also reports `ARM64
+  64bit`, so it is not an emulated x64 build.
+- **Not a missing environment variable.** Passing `SystemRoot`, `windir`,
+  `SystemDrive`, `PATH`, `TEMP` and `TMP` through with `--repo_env` changes
+  nothing. An earlier run that appeared to fix this was misread: repository
+  evaluation order is not deterministic, so it had merely surfaced a different
+  failure first. The `--repo_env=SystemRoot` line was therefore reverted rather
+  than kept as unverified configuration.
+
+So the failure is specific to Winsock initialising inside Bazel's
+repository-rule subprocess on Windows ARM64, and the cause is not yet
+identified.
+
+Options not yet tried, roughly in order of appeal:
+
+- Find out whether `rules_pycross` is reachable from the KGEN graph at all. Like
+  grpc, it may be MAX-only, in which case the fix is for it not to be in the
+  graph.
+- Pin `rules_pycross` to a version whose bootstrap avoids pip, or patch its
+  wheel install to not import `asyncio`.
+- Drive `clang.exe` directly for one run to prove the compiler, sysroot and CRT
+  link work, decoupling that proof from the Bazel dependency graph.
+
+The last is worth doing regardless: it separates "is the toolchain right" from
+"does the repo's dependency graph resolve on Windows", which are independent
+risks currently entangled.
+
 ### Repository state
 
 The fork now has a real remote: `origin` =
