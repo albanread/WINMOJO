@@ -174,6 +174,17 @@ rebuild_wheel = repository_rule(
 
 def _modular_wheel_repository_impl(rctx):
     rctx.file("BUILD.bazel", """
+# There is no Windows wheel yet: max-core ships no windows-arm64 build. Every
+# alias below resolves to this target on Windows, which propagates
+# IncompatiblePlatformProvider so that dependents are cleanly SKIPPED rather
+# than failing analysis. When a native wheel exists (DragonMax), the selects
+# gain a real branch and this target retires.
+filegroup(
+    name = "unavailable_on_windows",
+    target_compatible_with = ["@platforms//:incompatible"],
+    visibility = ["//visibility:public"],
+)
+
 load("@rules_pycross//pycross:defs.bzl", "pycross_wheel_library")
 load("@@//bazel:api.bzl", "requirement")
 load("@@//bazel:mojo_aliases.bzl", "INTERNAL_PACKAGES")
@@ -185,6 +196,7 @@ alias(
         "@//:linux_aarch64": "@module_platlib_linux_aarch64//:max",
         "@//:linux_x86_64": "@module_platlib_linux_x86_64//:max",
         "@platforms//os:macos": "@module_platlib_macos_arm64//:max",
+        "@platforms//os:windows": ":unavailable_on_windows",
     }),
     visibility = ["//visibility:public"],
 )
@@ -195,6 +207,7 @@ alias(
         "@//:linux_aarch64": "@module_platlib_linux_aarch64//:tblgen_python_srcs",
         "@//:linux_x86_64": "@module_platlib_linux_x86_64//:tblgen_python_srcs",
         "@platforms//os:macos": "@module_platlib_macos_arm64//:tblgen_python_srcs",
+        "@platforms//os:windows": ":unavailable_on_windows",
     }),
     visibility = ["//visibility:public"],
 )
@@ -205,6 +218,7 @@ alias(
         "@//:linux_aarch64": "@module_platlib_linux_aarch64//:max_lib",
         "@//:linux_x86_64": "@module_platlib_linux_x86_64//:max_lib",
         "@platforms//os:macos": "@module_platlib_macos_arm64//:max_lib",
+        "@platforms//os:windows": ":unavailable_on_windows",
     }),
     visibility = ["//visibility:public"],
 )
@@ -215,6 +229,7 @@ alias(
         "@//:linux_aarch64": "@module_platlib_linux_aarch64//:AsyncRTMojoBindings_lib",
         "@//:linux_x86_64": "@module_platlib_linux_x86_64//:AsyncRTMojoBindings_lib",
         "@platforms//os:macos": "@module_platlib_macos_arm64//:AsyncRTMojoBindings_lib",
+        "@platforms//os:windows": ":unavailable_on_windows",
     }),
     visibility = ["//visibility:public"],
 )
@@ -225,6 +240,7 @@ alias(
         "@//:linux_aarch64": "@module_platlib_linux_aarch64//:CompilerRT_lib",
         "@//:linux_x86_64": "@module_platlib_linux_x86_64//:CompilerRT_lib",
         "@platforms//os:macos": "@module_platlib_macos_arm64//:CompilerRT_lib",
+        "@platforms//os:windows": ":unavailable_on_windows",
     }),
     visibility = ["//visibility:public"],
 )
@@ -236,6 +252,7 @@ alias(
             "@//:linux_aarch64": "@module_platlib_linux_aarch64//:" + lib.split("/")[-1],
             "@//:linux_x86_64": "@module_platlib_linux_x86_64//:" + lib.split("/")[-1],
             "@platforms//os:macos": "@module_platlib_macos_arm64//:" + lib.split("/")[-1],
+            "@platforms//os:windows": ":unavailable_on_windows",
         }),
         visibility = ["//visibility:public"],
     )

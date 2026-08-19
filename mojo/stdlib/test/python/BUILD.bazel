@@ -24,6 +24,10 @@ _NUMPY_TESTS = [
         python_version = version.replace("_", "."),
         target_compatible_with = select({
             "//:asan": ["@platforms//:incompatible"],
+            # Python interop tests need a hermetic CPython resolvable for the
+            # legacy @bazel_tools python toolchain type, which has no
+            # windows-arm64 registration yet. Skip rather than fail analysis.
+            "@platforms//os:windows": ["@platforms//:incompatible"],
             "//conditions:default": [],
         }),
         deps = [
@@ -48,6 +52,10 @@ _NUMPY_TESTS = [
         python_version = version.replace("_", "."),
         target_compatible_with = select({
             "//:asan": ["@platforms//:incompatible"],
+            # Python interop tests need a hermetic CPython resolvable for the
+            # legacy @bazel_tools python toolchain type, which has no
+            # windows-arm64 registration yet. Skip rather than fail analysis.
+            "@platforms//os:windows": ["@platforms//:incompatible"],
             "//conditions:default": [],
         }),
         deps = [

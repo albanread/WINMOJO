@@ -80,14 +80,20 @@ REM overridden by them.
   echo build --spawn_strategy=remote,worker,standalone
   echo build --strategy=TestRunner=remote,worker,standalone
   echo build --experimental_output_paths=off
+  echo # rules_shell's toolchain repo detects bash through BAZEL_SH in the
+  echo # *repository* environment, which the client env does not reach. Without
+  echo # this every sh_binary — including bazel_tools' collect_coverage, an
+  echo # implicit dep of every test — fails analysis with "No suitable shell
+  echo # toolchain found", taking the whole test graph down with it.
+  echo build --repo_env=BAZEL_SH=%BAZEL_SH%
   echo # PE/COFF has no rpath: a DLL is found through the executable's directory
   echo # and the search path. Bazel's runtime_library_search_directories feature
   echo # emits -Wl,-rpath,$ORIGIN/... regardless, which lld-link reads as a
   echo # filename. The feature is neither overridable nor separately disableable
   echo # in the toolchain, so it is switched off by name here.
-  echo build --features=-runtime_library_search_directories
-  echo # --host_features as well: every failing link was a [for tool] target,
-  echo # and --features applies only to the target configuration.
+  echo build --features=-runtime_library_search_directories
+  echo # --host_features as well: every failing link was a [for tool] target,
+  echo # and --features applies only to the target configuration.
   echo build --host_features=-runtime_library_search_directories
   echo import %%workspace%%/build/local-resources.bazelrc
 )
