@@ -1014,3 +1014,47 @@ rebuild finishes because that file is an input of the running build.
 wrong for a Windows PATH but possibly split on ':' by lit itself; and the `uv`
 alias has no Windows case but only gates pip lockfile regeneration, nowhere
 near the stdlib tests. Both wait for a real failure before being touched.
+
+## Nobody delivers the dynamic CRT: a link told in three acts
+
+Adding `-fms-runtime-lib=dll` to the compile args was necessary but turned out
+to be one third of the fix. The full rebuild compiled 6,800 actions cleanly and
+then failed to link mojo.exe, twice, each failure teaching one mechanism.
+
+**Act one: the driver has its own opinion.** The first relink died with
+undefined `__imp_` symbols for oddly minor functions — `strtoull`, `isxdigit`,
+`_fpclass`, `isupper` — beneath a scroll of LNK4217 warnings saying `free`,
+`calloc` and `exit` were "locally defined symbols imported", defined in
+`libucrt.lib`. Static ucrt, in a build where every object was compiled for the
+dynamic CRT. `clang++ -###` on the exact params file showed why: clang 22's
+MSVC linker job does not read `-fms-runtime-lib` — that flag only shapes cc1
+compile lines — and unconditionally passes `-defaultlib:libcmt` to lld-link.
+The static CRT walks in through the front door on every link this driver
+constructs. Symbols some static member happened to define resolved with a
+warning; the ones nothing referenced statically became undefined imports.
+
+**Act two: the veto exposes a second failure.** `/NODEFAULTLIB:libcmt.lib`
+removed the static CRT and the link fell to a single error: `mainCRTStartup`
+undefined. Startup for the dynamic CRT lives in msvcrt.lib — which every
+object requests via the `DEFAULTLIB:msvcrt.lib` directive embedded by the
+compile-side flag, and which mojo.o demonstrably carries (llvm-readobj shows
+DEFAULTLIB:msvcprt.lib, msvcrt.lib, oldnames.lib). The directives were not
+being honored for objects packed into .lib archives: the earlier failure had
+already hinted at this, with std::time_get symbols from msvcprt undefined
+while the referencing object named msvcprt in its .drectve. Two delivery
+mechanisms, both broken — one in the driver, one in directive processing.
+
+**Act three: say what you mean.** The link args now state the complete
+dynamic CRT explicitly: `/NODEFAULTLIB:libcmt.lib` to veto the driver, then
+`/DEFAULTLIB:` msvcrt, msvcprt, ucrt, vcruntime. Rerunning the failed link
+with exactly those flags produced a 125 MB mojo.exe importing MSVCP140.dll,
+VCRUNTIME140.dll and the api-ms-win-crt-* aprons — including
+api-ms-win-crt-heap-l1-1-0.dll, which is the entire point: one ucrtbase heap
+for the process.
+
+Two smaller observations from the same params file, recorded for later:
+Bazel's alwayslink emission (`-whole-archive`/`-no-whole-archive`) is ignored
+with a warning by lld-link, so constructor-driven objects like runtool ride on
+luck rather than /WHOLEARCHIVE; and clang appends the host's Visual Studio
+lib directories before ours, so the sysroot is only hermetic while the host
+SDK happens to match. Neither blocks the current gate.
