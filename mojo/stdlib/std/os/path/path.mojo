@@ -79,21 +79,44 @@ def _user_home_path(path: String) -> String:
     var user_end = path.find(sep, 1)
     if user_end < 0:
         user_end = path.byte_length()
-    # Special POSIX syntax for ~[user-name]/path
-    if path.byte_length() > 1 and user_end > 1:
-        try:
-            return getpwnam(String(path[byte=1:user_end])).pw_dir
-        except:
-            return ""
-    else:
-        var user_home = getenv("HOME")
-        # Fallback to password database if `HOME` not set
+
+    comptime if CompilationTarget.is_windows():
+        # Windows has no password database. The profile directory is named by
+        # USERPROFILE, with HOMEDRIVE+HOMEPATH as the older fallback.
+        var user_home = getenv("USERPROFILE")
         if not user_home:
+            var drive = getenv("HOMEDRIVE")
+            var home_path = getenv("HOMEPATH")
+            if not home_path:
+                return ""
+            user_home = drive + home_path
+
+        # ~[user-name] resolves by substituting the last component of the
+        # current user's profile path, which is what CPython does here: user
+        # profiles are siblings under the same parent.
+        if path.byte_length() > 1 and user_end > 1:
+            var target_user = String(path[byte=1:user_end])
+            var parent = dirname(user_home)
+            if not parent:
+                return ""
+            return parent + String(sep) + target_user
+        return user_home
+    else:
+        # Special POSIX syntax for ~[user-name]/path
+        if path.byte_length() > 1 and user_end > 1:
             try:
-                user_home = getpwuid(getuid()).pw_dir
+                return getpwnam(String(path[byte=1:user_end])).pw_dir
             except:
                 return ""
-        return user_home
+        else:
+            var user_home = getenv("HOME")
+            # Fallback to password database if `HOME` not set
+            if not user_home:
+                try:
+                    user_home = getpwuid(getuid()).pw_dir
+                except:
+                    return ""
+            return user_home
 
 
 def expanduser[PathLike: stdPathLike, //](path: PathLike) raises -> String:

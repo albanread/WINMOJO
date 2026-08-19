@@ -285,6 +285,11 @@ def getuid() -> Int:
     Constraints:
         This function is constrained to run on Linux or macOS operating systems only.
     """
+    comptime if CompilationTarget.is_windows():
+        # Windows identifies users by SID, not by a numeric uid; there is no
+        # meaningful value to return and inventing one would be worse than
+        # refusing at compile time.
+        CompilationTarget.unsupported_target_error[operation="os.getuid()"]()
     return Int(external_call["getuid", UInt32]())
 
 
