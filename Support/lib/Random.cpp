@@ -62,7 +62,11 @@ SecureRandomBytesGenerator::getRandomBytes(MutableArrayRef<uint8_t> buf) {
   } while (bytesNeeded > 0);
   return success();
 #elif defined(_WIN32)
-  if (CryptGenRandom((HCRYPTPROV)ctx, buf.size(), buf.data()))
+  // CryptGenRandom returns non-zero on *success*, unlike the POSIX calls above
+  // which return 0. Testing it the other way round reported a failure every
+  // time it worked, and the caller in TelemetryContext.cpp asserts on the
+  // result, so mojo aborted before compiling anything.
+  if (!CryptGenRandom((HCRYPTPROV)ctx, buf.size(), buf.data()))
     return Error("random read failed");
   return success();
 #endif // __APPLE__ | __linux__ | _WIN32
