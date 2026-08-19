@@ -35,9 +35,13 @@ def _declare_windows_tools(platform):
     """Declare tools for a Windows platform.
 
     Windows cannot exec the multi-platform .sh wrappers, and there is no
-    separate linker driver: the clang driver invokes lld-link itself. The
-    macOS-only tools (llvm-otool, llvm-install-name-tool, dsymutil) are omitted
-    because they have no meaning for a PE/COFF target.
+    separate linker driver: the clang driver invokes lld-link itself.
+
+    Everything else is declared exactly as on the other platforms. llvm-otool
+    and llvm-install-name-tool read as Mach-O tools but LLVM does ship them in
+    the Windows distribution, so they are declared rather than special-cased,
+    which keeps the alias list in tools/BUILD.bazel uniform across platforms.
+    dwp is the one real omission: split DWARF does not apply to PDB debug info.
     """
     ext = _exe(platform)
 
@@ -70,6 +74,20 @@ def _declare_windows_tools(platform):
             "manual",
             TOP_LEVEL_TAG,  # Used in .bazelrc
         ],
+    )
+
+    cc_tool(
+        name = "{}-llvm-install-name-tool".format(platform),
+        src = "@clang-{}//:bin/llvm-install-name-tool{}".format(platform, ext),
+        data = ["@clang-{}//:bin/llvm-objcopy{}".format(platform, ext)],
+        tags = ["manual"],
+    )
+
+    cc_tool(
+        name = "{}-llvm-otool".format(platform),
+        src = "@clang-{}//:bin/llvm-otool{}".format(platform, ext),
+        data = ["@clang-{}//:bin/llvm-objdump{}".format(platform, ext)],
+        tags = ["manual"],
     )
 
     # lld-link is the actual linker the clang driver spawns for a

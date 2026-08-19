@@ -286,6 +286,10 @@ cc_args(
     args = select({
         "@platforms//os:linux": ["-Wl,--gc-sections"],
         "@platforms//os:macos": ["-Wl,-dead_strip"],
+        # /OPT:REF is lld-link's equivalent dead-strip. It is already the
+        # default for a release link, but not once /DEBUG is present, so state
+        # it rather than depend on that interaction.
+        "@platforms//os:windows": ["-Wl,/OPT:REF"],
     }),
 )
 

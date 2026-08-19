@@ -41,6 +41,20 @@ if "%IS_BUILD_TEST_OR_RUN%"=="true" if "%HAS_MOJO_CONFIG%"=="false" (
   exit /b 1
 )
 
+REM Some actions, such as the builtin module map generator, are shell scripts.
+REM Bazel needs BAZEL_SH to find a bash on Windows; without it those actions
+REM fail with "The system cannot find the file specified".
+if "%BAZEL_SH%"=="" (
+  for %%p in (
+    "%ProgramFiles%\Git\usr\bin\bash.exe"
+    "%ProgramFiles%\Git\bin\bash.exe"
+    "%ProgramFiles(x86)%\Git\usr\bin\bash.exe"
+    "%LOCALAPPDATA%\Programs\Git\usr\bin\bash.exe"
+  ) do (
+    if exist %%p if "!BAZEL_SH!"=="" set "BAZEL_SH=%%~p"
+  )
+)
+
 if not exist "%BAZELRC_ROOT%\logs" mkdir "%BAZELRC_ROOT%\logs"
 
 if not exist "%BAZELRC_ROOT%\local-resources.bazelrc" (

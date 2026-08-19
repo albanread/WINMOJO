@@ -61,6 +61,7 @@ declare_tools()
             "//:linux_aarch64": ":linux-aarch64-{}".format(tool),
             "//:linux_x86_64": ":linux-x86_64-{}".format(tool),
             "@platforms//os:macos": ":macos-{}".format(tool),
+            "//:windows_arm64": ":windows-arm64-{}".format(tool),
         }),
         tags = [
             "manual",
