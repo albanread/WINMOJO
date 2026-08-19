@@ -156,6 +156,13 @@ config_setting(
             "macos",
             ["@platforms//os:macos"],
         ),
+        (
+            "windows_arm64",
+            [
+                "@platforms//cpu:aarch64",
+                "@platforms//os:windows",
+            ],
+        ),
     ]
 ]
 
@@ -172,6 +179,14 @@ config_setting(
     constraint_values = [
         "@platforms//cpu:aarch64",
         "@platforms//os:linux",
+    ],
+)
+
+config_setting(
+    name = "windows_arm64",
+    constraint_values = [
+        "@platforms//cpu:aarch64",
+        "@platforms//os:windows",
     ],
 )
 

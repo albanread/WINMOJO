@@ -8,12 +8,94 @@ PLATFORMS = [
     "linux-aarch64",
     "linux-x86_64",
     "macos",
+    "windows-arm64",
 ]
+
+# Platforms whose toolchain binaries carry a .exe suffix and which cannot run
+# the .sh tool wrappers, so they bind the clang binaries directly instead.
+WINDOWS_PLATFORMS = [
+    "windows-arm64",
+]
+
+def _is_windows(platform):
+    return platform in WINDOWS_PLATFORMS
+
+def _exe(platform):
+    return ".exe" if _is_windows(platform) else ""
 
 # buildifier: disable=unnamed-macro
 def declare_tools():
     for platform in PLATFORMS:
-        _declare_tools(platform)
+        if _is_windows(platform):
+            _declare_windows_tools(platform)
+        else:
+            _declare_tools(platform)
+
+def _declare_windows_tools(platform):
+    """Declare tools for a Windows platform.
+
+    Windows cannot exec the multi-platform .sh wrappers, and there is no
+    separate linker driver: the clang driver invokes lld-link itself. The
+    macOS-only tools (llvm-otool, llvm-install-name-tool, dsymutil) are omitted
+    because they have no meaning for a PE/COFF target.
+    """
+    ext = _exe(platform)
+
+    cc_tool_map(
+        name = "{}_tools".format(platform),
+        tags = ["manual"],
+        visibility = ["//bazel/internal/cc-toolchain:__subpackages__"],
+        tools = {
+            "@rules_cc//cc/toolchains/actions:ar_actions": ":{}-llvm-ar".format(platform),
+            "@rules_cc//cc/toolchains/actions:assembly_actions": ":{}-clang".format(platform),
+            "@rules_cc//cc/toolchains/actions:c_compile": ":{}-clang".format(platform),
+            "@rules_cc//cc/toolchains/actions:cpp_compile_actions": ":{}-clang++".format(platform),
+            "@rules_cc//cc/toolchains/actions:link_actions": ":{}-clang++".format(platform),
+            "@rules_cc//cc/toolchains/actions:objcopy_embed_data": ":{}-llvm-objcopy".format(platform),
+            "@rules_cc//cc/toolchains/actions:strip": ":{}-llvm-strip".format(platform),
+        },
+    )
+
+    for tool in ["llvm-ar", "llvm-objcopy", "llvm-strip", "clang-format", "clangd"]:
+        cc_tool(
+            name = "{}-{}".format(platform, tool),
+            src = "@clang-{}//:bin/{}{}".format(platform, tool, ext),
+            tags = ["manual"],
+        )
+
+    cc_tool(
+        name = "{}-clang-tidy".format(platform),
+        src = "@clang-{}//:bin/clang-tidy{}".format(platform, ext),
+        tags = [
+            "manual",
+            TOP_LEVEL_TAG,  # Used in .bazelrc
+        ],
+    )
+
+    # lld-link is the actual linker the clang driver spawns for a
+    # *-pc-windows-msvc target, so it must be present in the tool's runfiles.
+    cc_tool(
+        name = "{}-clang".format(platform),
+        src = "@clang-{}//:bin/clang{}".format(platform, ext),
+        data = ["@clang-{}//:ld".format(platform)],
+        tags = ["manual"],
+    )
+
+    cc_tool(
+        name = "{}-clang++".format(platform),
+        src = "@clang-{}//:bin/clang++{}".format(platform, ext),
+        data = ["@clang-{}//:ld".format(platform)],
+        tags = ["manual"],
+    )
+
+    for name in ["builtin_headers", "resource_directory_filegroup", "resource_directory"]:
+        actual = "include" if name == "builtin_headers" else name
+        native.alias(
+            name = "{}-{}".format(platform, name),
+            actual = "@clang-{}//:{}".format(platform, actual),
+            tags = ["manual"],
+            visibility = ["//visibility:private"],
+        )
 
 def _declare_tools(platform):
     cc_tool_map(

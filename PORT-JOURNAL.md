@@ -224,3 +224,99 @@ equal to the digest GitHub publishes for the asset.
 
 **Next: G2** — the `windows_arm64` platform and an MSVC `cc_toolchain` in their
 custom `rules_cc` framework. Nothing further can build until that exists.
+
+---
+
+## G2 — Windows ARM64 toolchain declared (2026-08-19)
+
+### Correction to the G1 plan
+
+G1 called this "write an MSVC `cc_toolchain`". That was wrong, and reading
+`tools/tools.bzl` changed the approach entirely: **Modular do not use MSVC on any
+platform.** Every toolchain is hermetic Clang/LLVM — `@clang-{platform}//:bin/clang`,
+`compiler = "clang"`, lld, and hermetic sysroots.
+
+So writing an MSVC toolchain would have meant rewriting every `cc_args` in
+`args/` and `features/` from GNU-style flags to `/W4`-style MSVC flags. Instead
+we add a *fourth hermetic clang platform* and target `aarch64-pc-windows-msvc`
+with the ordinary clang driver, which keeps every existing GNU-style arg working
+unchanged. Using `clang-cl` would have reintroduced exactly the flag-dialect
+problem, so it is deliberately avoided.
+
+### The lucky break
+
+Modular pin **LLVM 22.1.4** and host their own builds on S3, with no Windows
+artifact. But upstream LLVM publish
+`clang+llvm-22.1.4-aarch64-pc-windows-msvc.tar.xz` — *the exact same version*.
+So `clang.BUILD`'s expected `lib/clang/22/...` layout lines up with no patching,
+and we source that one platform from `llvm/llvm-project` releases instead of
+Modular's S3. This is the difference between "port the toolchain" and "add a
+platform".
+
+737 MB, sha256 `958e314fc28968c3895a61c0b9ae54c9e4ec7a409ec4b59cc02c9c6a0ae90be4`.
+
+### Changes
+
+| File | Change |
+| --- | --- |
+| `BUILD.bazel` | Added `//:windows_arm64` config_setting and its `prebuilt_mojo_toolchain_enabled` entry. |
+| `bazel/common.MODULE.bazel` | Added the `clang-windows-arm64` http_archive. |
+| `MODULE.bazel` | Instantiated `windows_sysroot_repository`. |
+| `bazel/internal/cc-toolchain/windows_sysroot_repository.bzl` | **New.** Locates MSVC + Windows SDK, emits `cc_args`. |
+| `bazel/internal/cc-toolchain/tools/tools.bzl` | Added `windows-arm64` to `PLATFORMS` plus a separate `_declare_windows_tools`. |
+| `bazel/internal/cc-toolchain/BUILD.bazel` | Windows sysroot args, target-triple args, four artifact-name patterns, toolchain registration, coverage_support entry. |
+
+### Why Windows needs its own tool declarations
+
+The existing tool map cannot be reused as-is:
+
+- The `clang`/`clang++`/linker tools are **bash wrappers**
+  (`multi-platform-clang.sh` and friends) that Windows cannot exec. Windows binds
+  the `.exe` binaries directly.
+- There is **no separate linker driver**: for a `windows-msvc` target the clang
+  driver spawns `lld-link` itself, so `link_actions` map to `clang++`, with
+  `:ld` carried in the tool's `data` so lld is present in runfiles.
+- `llvm-otool`, `llvm-install-name-tool` and `dsymutil` are Mach-O tools with no
+  PE/COFF meaning, so they are omitted.
+- `dwp` is omitted: split DWARF does not apply to PDB-based debug info.
+
+### The sysroot problem, and why this one is not hermetic
+
+There is no `--sysroot` for an MSVC target, and `.bazelrc` sets
+`--incompatible_strict_action_env`, so clang cannot discover MSVC from the
+environment the way it does in a `vcvars` shell. `windows_sysroot_repository`
+therefore resolves the paths once at fetch time — via `vswhere`, falling back to
+scanning the standard install layout — and bakes them into `cc_args`. It fails
+loudly with an actionable message if a directory is missing, rather than letting
+clang fail later with a confusing missing-header error.
+
+This one is deliberately **not** hermetic. Microsoft's licence does not permit
+redistributing the CRT headers and import libraries the way the Linux sysroots
+are redistributed, so a hermetic Windows sysroot would have to be assembled on
+the machine anyway.
+
+### Verified
+
+- `bazel query //bazel/internal/cc-toolchain:all` exits 0 and lists
+  `windows-arm64-toolchain`, `windows-arm64_clang_toolchain`, all four artifact
+  patterns and `windows_arm64_target`.
+- `bazel query @sysroot-windows-arm64//:all` exits 0: the repository rule runs
+  and detects **MSVC 14.51.36231** and **Windows SDK 10.0.26100.0**, emitting
+  correct `-imsvc` include paths and `-L` library paths for `arm64`.
+
+### Not yet verified
+
+**Nothing has been compiled.** The 737 MB clang archive has not been downloaded,
+so no C++ has gone through this toolchain. Declaration and analysis are proven;
+codegen is not. Expect real iteration here — flag-dialect mismatches in `args/`
+and `features/`, and CRT link details, will only surface at first compile.
+
+### Trap: do not mix shells
+
+Driving Bazel from Git-Bash and PowerShell alternately restarts the Bazel server
+every time, because Git-Bash injects
+`--host_jvm_args=-Dbazel.windows_unix_root=...` and PowerShell does not. Pick one
+shell per session. PowerShell + `bazelw.cmd` is the better default, since it also
+avoids the `//`-label mangling.
+
+**Next: G3** — fetch the clang archive and put real C++ through the toolchain.

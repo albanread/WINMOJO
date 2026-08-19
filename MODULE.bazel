@@ -23,6 +23,13 @@ macos_sysroot_repository = use_repo_rule("//bazel/internal/cc-toolchain:macos_sy
 
 macos_sysroot_repository(name = "sysroot-macos")
 
+windows_sysroot_repository = use_repo_rule("//bazel/internal/cc-toolchain:windows_sysroot_repository.bzl", "windows_sysroot_repository")
+
+windows_sysroot_repository(
+    name = "sysroot-windows-arm64",
+    target_arch = "arm64",
+)
+
 include("//bazel:mojo.MODULE.bazel")
 
 link_hack = use_repo_rule("//bazel/internal:link_hack.bzl", "link_hack")

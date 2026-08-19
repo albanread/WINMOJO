@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc/toolchains:args.bzl", "cc_args")
 load("@rules_cc//cc/toolchains:artifacts.bzl", "cc_artifact_name_pattern")
 load("@rules_cc//cc/toolchains:make_variable.bzl", "cc_make_variable")
 load("@rules_cc//cc/toolchains:toolchain.bzl", "cc_toolchain")
@@ -49,6 +50,11 @@ cc_sysroot(
         args = select({
             "//:linux_x86_64": [":linux_sysroot_x86_64"],
             "//:linux_aarch64": [":linux_sysroot_aarch64"],
+            "//:windows_arm64": [
+                ":windows_arm64_target",
+                "@sysroot-windows-arm64//:includes",
+                "@sysroot-windows-arm64//:libs",
+            ],
             "@platforms//os:macos": [":macos_sysroot"],
         }) + [
             "//bazel/internal/cc-toolchain/args:resource_dir_args",
@@ -74,6 +80,12 @@ cc_sysroot(
             "@platforms//os:macos": [
                 ":macos-dylib-pattern",
                 ":macos-tbd-pattern",
+            ],
+            "//:windows_arm64": [
+                ":windows-executable-pattern",
+                ":windows-dynamic-library-pattern",
+                ":windows-import-library-pattern",
+                ":windows-static-library-pattern",
             ],
             "//conditions:default": [],
         }),
@@ -157,6 +169,46 @@ cc_make_variable(
     variable_name = "STACK_FRAME_UNLIMITED",
 )
 
+# The hermetic clang is a *-pc-windows-msvc build, but the driver still has to be
+# told which target to emit for. Using the clang driver rather than clang-cl
+# keeps the GNU-style flags in args/ and features/ working unchanged.
+cc_args(
+    name = "windows_arm64_target",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:compile_actions",
+        "@rules_cc//cc/toolchains/actions:link_actions",
+    ],
+    args = ["--target=aarch64-pc-windows-msvc"],
+)
+
+cc_artifact_name_pattern(
+    name = "windows-executable-pattern",
+    category = "@rules_cc//cc/toolchains/artifacts:executable",
+    extension = ".exe",
+    prefix = "",
+)
+
+cc_artifact_name_pattern(
+    name = "windows-dynamic-library-pattern",
+    category = "@rules_cc//cc/toolchains/artifacts:dynamic_library",
+    extension = ".dll",
+    prefix = "",
+)
+
+cc_artifact_name_pattern(
+    name = "windows-import-library-pattern",
+    category = "@rules_cc//cc/toolchains/artifacts:interface_library",
+    extension = ".lib",
+    prefix = "",
+)
+
+cc_artifact_name_pattern(
+    name = "windows-static-library-pattern",
+    category = "@rules_cc//cc/toolchains/artifacts:static_library",
+    extension = ".lib",
+    prefix = "",
+)
+
 toolchain(
     name = "linux-aarch64-toolchain",
     exec_compatible_with = [
@@ -190,6 +242,17 @@ toolchain(
     toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
 )
 
+toolchain(
+    name = "windows-arm64-toolchain",
+    exec_compatible_with = [
+        "@platforms//cpu:aarch64",
+        "@platforms//os:windows",
+    ],
+    tags = [TOP_LEVEL_TAG],  # Used from MODULE.bazel
+    toolchain = ":windows-arm64_clang_toolchain",
+    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+)
+
 # gazelle:ignore
 cc_library(name = "empty_lib")
 
@@ -201,6 +264,9 @@ cc_import(
         "//:linux_x86_64": "@clang-linux-x86_64//:lib/clang/22/lib/x86_64-unknown-linux-gnu/libclang_rt.asan.so",
         "@platforms//os:macos": "@clang-macos//:lib/clang/22/lib/darwin/libclang_rt.asan_osx_dynamic.dylib",
     }),
+    # Sanitizers are out of scope for the Windows port. This target is only
+    # reachable via :extra_lib, which selects :empty_lib on Windows, so the
+    # select above is never evaluated there.
 )
 
 cc_import(
@@ -243,6 +309,10 @@ filegroup(
         "@platforms//os:macos": [
             "@clang-macos//:bin/llvm-cov",
             "@clang-macos//:bin/llvm-profdata",
+        ],
+        "//:windows_arm64": [
+            "@clang-windows-arm64//:bin/llvm-cov.exe",
+            "@clang-windows-arm64//:bin/llvm-profdata.exe",
         ],
     }),
     tags = [TOP_LEVEL_TAG],  # Used from .bazelrc
