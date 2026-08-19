@@ -492,6 +492,62 @@ Worth noting the sequencing: this bug sat behind the pip/Winsock failures and
 would only have surfaced after they were solved. Testing the toolchain directly
 found it immediately, which is a good argument for keeping that script around.
 
+### Scope correction: "not built here" is not "chop it out"
+
+MAX is being ported to Windows ARM64 / Snapdragon / Adreno / Hexagon NPU as a
+separate project that forks this trunk. So while MAX is not *built* here, every
+MAX integration point — grpc, protoc-gen-validate, rules_pycross, the pip and
+python plumbing — has to be made to **work** on Windows ARM64, never deleted or
+excluded from the graph to turn a build green. Removing a dependency to get a
+build passing here would leave a hole that the MAX port inherits.
+
+An earlier suggestion in this journal to check whether `rules_pycross` was
+reachable and keep it out of the graph was wrong on those grounds, and is
+withdrawn. The distinction that does hold is between a *platform gap* and an
+*inapplicable concept*: Mach-O tools such as `llvm-otool` and
+`llvm-install-name-tool` have no PE/COFF meaning, and omitting those is not the
+same as dropping a dependency.
+
+### Winsock, solved: rctx.execute replaces the environment
+
+`rules_pycross`'s `install_venv_wheels` does:
+
+```python
+env = dict(PYTHONPATH = str(rctx.path(pip_whl)))
+result = rctx.execute([...], environment = env)
+```
+
+`rctx.execute(environment = ...)` **replaces** the environment rather than
+extending it, so the subprocess gets `PYTHONPATH` and nothing else. Windows
+cannot initialise Winsock without `SystemRoot`, so any import reaching `asyncio`
+dies with `WinError 10106`. pip imports `tenacity`, which imports `asyncio`.
+
+Reproduced exactly, outside Bazel:
+
+| Environment passed to the same interpreter | Result |
+| --- | --- |
+| `{PYTHONPATH}` — what the rule passes | `WinError 10106` |
+| `{PYTHONPATH, SystemRoot}` | `OK` |
+
+This also explains why `--repo_env=SystemRoot` never helped: the rule discards
+the inherited environment before that flag can matter. It is an upstream
+`rules_pycross` bug, not a Modular one, and it is patched rather than routed
+around.
+
+Two process notes worth keeping:
+
+- Earlier guesses at this — missing env vars, then
+  `--sandbox_default_allow_network` — were both wrong, and `env -i` testing
+  wrongly exonerated the environment because MSYS does not produce a truly empty
+  Windows environment block. Reading `repo_venv_utils.bzl` found it in minutes.
+  Read the code before theorising about the flags.
+- The patch is matched case-insensitively with a fallback, because whether
+  Bazel reports `SystemRoot` or `SYSTEMROOT` was not worth another guess.
+
+With that fixed, analysis moves past all the pip machinery and into the C++
+toolchain proper, where the remaining failures are ordinary missing-Windows
+branches in `select()`s.
+
 ### Repository state
 
 The fork now has a real remote: `origin` =
