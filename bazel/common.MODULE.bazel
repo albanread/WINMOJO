@@ -120,6 +120,9 @@ single_version_override(
         # upb's AArch64 assembly fast path leaves LLVM unable to size the
         # function for SEH unwind info on Windows ARM64.
         "//bazel/public-patches:protobuf-upb-windows-arm64-asm.patch",
+        # LINK_OPTS' Windows branch was written for MinGW and asks for
+        # pthread.lib and m.lib, which do not exist against the MSVC ABI.
+        "//bazel/public-patches:protobuf-windows-link-opts.patch",
     ],
 )
 
