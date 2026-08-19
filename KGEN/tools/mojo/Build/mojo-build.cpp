@@ -699,7 +699,7 @@ static int linkOutput(OutputType outputType, const State &state,
   std::error_code ec;
   std::filesystem::path cwd = std::filesystem::current_path(ec);
   if (!ec)
-    defaultOutputName = cwd.append(defaultOutputName);
+    defaultOutputName = cwd.append(defaultOutputName).string();
 
   // Invoke the system linker to link the archive into an executable or produce
   // a dynamic library using the provided output filename argument. The

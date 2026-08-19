@@ -285,7 +285,7 @@ static ErrorOrSuccess invokeRPC(bool dryRun, ArrayRef<int> ports,
                                       /*shouldClose=*/true,
                                       /*unbuffered=*/true);
   llvm::errs() << "[INFO] Additional logs can be found in "
-               << logFileOrErr->getPath()
+               << logFileOrErr->getPath().string()
                << ". Please include them when reporting bugs.\n\n";
   extraLogStream << "Server-side logs can be found in the `Mojo` section of "
                     "the `Output` tab of each VSCode Window.\n\n";

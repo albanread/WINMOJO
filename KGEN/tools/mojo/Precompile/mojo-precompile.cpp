@@ -272,7 +272,7 @@ static ErrorOrSuccess parsePrecompileArgs(const State &state,
         return isDirectoryOr.takeError();
       if (*isDirectoryOr) {
         outputPath = outputPath / (inputDirName + extension);
-        pkgArgs.outputPath = outputPath;
+        pkgArgs.outputPath = outputPath.string();
       }
 
       if (outputPath.extension() != ".mojoc")

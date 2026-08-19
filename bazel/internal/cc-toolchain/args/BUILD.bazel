@@ -233,7 +233,12 @@ cc_args(
         ],
         # lld-link takes none of the ELF or Mach-O options above, and the CRT
         # import libraries arrive via the autolink pragmas in the MSVC headers.
-        "@platforms//os:windows": [],
+        #
+        # /MACHINE is stated rather than left to inference. lld-link otherwise
+        # assumed x64 and rejected every input it was given, reporting
+        # "machine type arm64 conflicts with x64" against objects that were all
+        # correctly ARM64, including the CRT's own.
+        "@platforms//os:windows": ["-Wl,/MACHINE:ARM64"],
     }) + select({
         # Sanitizers are split across multiple libraries, some of which aren't linked to shared libraries
         "//:asan_linux": ["-Wl,-z,undefs"],
