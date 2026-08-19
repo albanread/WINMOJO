@@ -87,18 +87,65 @@ LLVM itself is not vendored as source in-tree — it is fetched by Bazel
 (`llvm_source` / `llvm_configure` in `MODULE.bazel`). KGEN carries its own
 bitcode readers/writers for LLVM **17, 19 and 21** side by side.
 
-### Next — G1 decision
+## G1 — The build-driver chain (2026-08-19)
 
-Two routes out of the Bazel problem, to be decided before any code is written:
+Traced what `./bazelw` actually does. It does not download Bazel; it downloads
+**bazelisk**, which then reads `.bazelversion` and fetches the real Bazel.
 
-- **(a) Bazel route.** Run x64 Bazel under emulation, driving native ARM64 MSVC.
-  Bazel has real Windows/MSVC support, so the work is writing a Windows
-  toolchain + platform into their custom `cc-toolchain`. Keeps us close to
-  upstream and makes rebasing tractable.
-- **(b) CMake route.** Bypass Bazel; build the KGEN subset with CMake+Ninja,
-  the way LLVM builds itself. More upfront work, far more control, no emulated
-  build driver — but we own a parallel build definition forever and every
-  upstream pull risks drift.
+```
+bazelw  ->  bazelisk v1.27.0  ->  .bazelversion = buildbuddy-io/5.0.382  ->  Bazel
+```
 
-Open question feeding the decision: does Bazel publish a `windows-arm64` binary,
-or is emulated x64 the only option?
+Checking each link for a Windows ARM64 build:
+
+| Link | windows-arm64? |
+| --- | --- |
+| bazelisk v1.27.0 | **Yes** — `bazelisk-windows-arm64.exe` is published |
+| Upstream `bazelbuild/bazel` 9.2.0 | **Yes** — `bazel-9.2.0-windows-arm64.exe` |
+| Pinned `buildbuddy-io/bazel` 5.0.382 | **No** — darwin-arm64, darwin-x86_64, linux-arm64, linux-x86_64 only. No Windows asset on any release. |
+
+So the pin is the blocker, not Bazel. Native ARM64 Windows Bazel exists upstream;
+Modular pin a BuildBuddy fork that is never built for Windows.
+
+Encouragingly, every BuildBuddy reference in the repo is remote cache / BES
+plumbing (`--bes_backend`, `--remote_cache`, `--remote_downloader`) and all of it
+sits behind the optional `:cache` and `:public-cache` configs. Nothing in a
+*local* build appears to need the fork. Repinning `.bazelversion` to upstream
+Bazel is a one-line experiment.
+
+### The expensive discovery
+
+`--config=prebuilt-mojo` — the route the contributor docs tell you to use, and
+the only cheap one — **downloads a prebuilt Mojo toolchain**. No Windows build of
+that toolchain exists, so the config is unavailable to us by definition.
+
+We are forced onto `--config=build-mojo`, which builds KGEN *and* LLVM from
+source. There is no cheap path onto this platform: the port requires a full
+compiler build from day one.
+
+### The cc-toolchain is fully custom
+
+`bazel/internal/cc-toolchain/BUILD.bazel` builds on the modern
+`@rules_cc//cc/toolchains` API — `cc_toolchain`, `cc_sysroot`,
+`cc_artifact_name_pattern`, plus their own `features/` and `tools/` with a
+`PLATFORMS` list. Sysroots are hand-declared for `linux_x86_64`,
+`linux_aarch64` and `macos`.
+
+It does **not** use Bazel's built-in MSVC auto-detection, so we cannot get
+Windows C++ for free by pointing Bazel at `vcvarsarm64`. A Windows toolchain has
+to be written inside their framework. This is the main structural work of the
+port.
+
+### Ladder
+
+| Gate | Goal | Status |
+| --- | --- | --- |
+| G0 | Recon, licence, toolchain, surface | Done |
+| G1 | Identify the build-driver blocker | Done — repin `.bazelversion` to upstream, add a `bazelw` Windows entry point |
+| G2 | Windows/MSVC `cc_toolchain` + `windows_arm64` platform in their rules_cc framework | Main structural work |
+| G3 | Build LLVM + MLIR + KGEN from source (`--config=build-mojo`) | Multi-GB, multi-hour |
+| G4 | `mojo.exe` links natively | |
+| G5 | stdlib shims: `dlopen`→`LoadLibrary`, `dlsym`→`GetProcAddress`, `fork`/`execvp`→`CreateProcess`, `unistd`/`O_RDONLY`; add the missing `os_is_windows` predicate | ~8 files |
+| G6 | `hello.mojo` compiles and runs natively on Windows ARM64 | Goal gate |
+
+G1's fix is cheap and testable. G3 is the long pole and cannot be deferred.
