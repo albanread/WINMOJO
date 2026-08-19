@@ -467,3 +467,74 @@ W4.0: find the real model-size ceiling on the HTP. The D0 measurement of
 to the HTP, its driver, or that backend is unknown, and it bounds the whole NPU
 line. With the SDK in hand it is cheap to answer, and `bin/` ships
 `qnn-net-run` and the converters to answer it with.
+
+---
+
+## 2026-08-19 — capability tests: GPU and NPU both execute
+
+Goal was narrow: prove the surfaces work at all, not benchmark them. Full
+report in `dragon/probe/CAPABILITIES.md`.
+
+| Surface | Loads | Executes |
+|---|---|---|
+| Adreno via our own OpenCL | yes | **yes** — saxpy exact, matmul 41.9 GFLOP/s exact |
+| Adreno via `QnnGpu` | yes | **yes** — vendor unit test passed |
+| Hexagon via `QnnHtp` | yes | **yes** — vendor unit test passed |
+| Oryon via `QnnCpu` | yes | provider negotiates; tool has no CPU unit test |
+| Full model graph | — | **blocked** on a toolchain gap, below |
+
+### The Hexagon failure was a path, not the hardware
+
+First DSP run failed outright — `-6 . Error while executing the sum function`,
+followed by advice about `testsig` and unsigned images. That advice is a red
+herring. The real cause was the second line: `ADSP_LIBRARY_PATH` was unset, so
+the DSP could not find its skels. Pointing it at
+`lib\hexagon-v81\unsigned` turned the same command into
+**"Unit Test on the backend DSP: Passed."**
+
+Two oddities logged without explanation, because guessing is how this project
+keeps getting caught out: the tool loads `QnnHtpV73CalculatorStub.dll` and
+reports *"Hexagon Architecture V73"* on V81 silicon, yet passes against V81
+skels. And `DSP_INFO UNSUPPORTED_KEY: 49/50` precedes every run harmlessly.
+**Do not read that "V73" as a hardware fact.**
+
+### QnnGpu is OpenCL underneath
+
+The validator's GPU run found `OpenCL.dll` and resolved Qualcomm extensions —
+including `clNewRecordingQCOM` / `clEnqueueRecordingQCOM`, a command
+record-and-replay facility that looks directly useful for a dispatch runtime
+later. It reported *"OpenCL 3.0 Qualcomm(R) Adreno(TM) X1-45 GPU"* and passed a
+vector-addition unit test.
+
+That means **QnnGpu takes the same OpenCL path our D2 kernel takes**, so D2's
+41.9 GFLOP/s is a fair yardstick to hold it against rather than an unrelated
+number. Good: the comparison we wanted is apples to apples.
+
+### Blocked, and precisely why
+
+`qnn-net-run` needs a compiled model library, and building the SDK's own
+example fails in three diagnosed steps:
+
+1. `qnn-model-lib-generator` hardcodes `cmake -T ClangCL`; this VS 18 install
+   has no ClangCL component → `MSB8020`.
+2. Forcing the default MSVC toolset configures fine, then fails to compile.
+   `/std:c++20` clears the designated-initializer error (`C7555`) but not
+   `C4576`/`C2059`, because the generated code uses `(Qnn_Tensor_t){...}` — a
+   **C compound literal**, a Clang/GCC extension that is not valid ISO C++ at
+   any standard level.
+3. No clang exists anywhere on this machine.
+
+**Qualcomm's generated model code requires Clang; there is no MSVC-only path.**
+That is a toolchain gap, not a limitation of the silicon, and it does not
+affect anything already proven above. Fix is a user action — VS Installer's
+*C++ Clang tools for Windows*, or an LLVM ARM64 install.
+
+Noted for the record: the generator writes its staging tree to `tmp_<pid>` in
+the **current working directory**, not the `-o` output dir, and leaves it
+behind. Two of them landed in `C:\projects`; both removed.
+
+### Next
+
+Once clang is available: build the example model and run `qnn-net-run` across
+`QnnCpu` / `QnnGpu` / `QnnHtp` for a like-for-like three-way comparison, then
+W4.0 — the HTP model-size ceiling.
