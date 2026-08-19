@@ -29,6 +29,8 @@ from ._linux_x86 import _lstat as _lstat_linux_x86
 from ._linux_x86 import _stat as _stat_linux_x86
 from ._macos import _lstat as _lstat_macos
 from ._macos import _stat as _stat_macos
+from ._windows import _lstat as _lstat_windows
+from ._windows import _stat as _stat_windows
 
 
 # ===----------------------------------------------------------------------=== #
@@ -193,9 +195,15 @@ def stat[PathLike: stdPathLike](path: PathLike) raises -> stat_result:
     """
     var fspath = path.__fspath__()
 
-    comptime if CompilationTarget.is_macos():
+    comptime if CompilationTarget.is_windows():
+        return _stat_windows(fspath^)._to_stat_result()
+    elif CompilationTarget.is_macos():
         return _stat_macos(fspath^)._to_stat_result()
     elif CompilationTarget.has_neon():
+        # NOTE: has_neon() is standing in for "Linux on ARM" here, which is
+        # only true once Windows has been handled above: Windows ARM64 has
+        # NEON too, and would otherwise take the glibc path and fail to link
+        # against __xstat.
         return _stat_linux_arm(fspath^)._to_stat_result()
     else:
         return _stat_linux_x86(fspath^)._to_stat_result()
@@ -222,7 +230,9 @@ def lstat[PathLike: stdPathLike](path: PathLike) raises -> stat_result:
     """
     var fspath = path.__fspath__()
 
-    comptime if CompilationTarget.is_macos():
+    comptime if CompilationTarget.is_windows():
+        return _lstat_windows(fspath^)._to_stat_result()
+    elif CompilationTarget.is_macos():
         return _lstat_macos(fspath^)._to_stat_result()
     elif CompilationTarget.has_neon():
         return _lstat_linux_arm(fspath^)._to_stat_result()

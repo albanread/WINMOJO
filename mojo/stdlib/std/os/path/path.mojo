@@ -34,6 +34,8 @@ from .._linux_x86 import _lstat as _lstat_linux_x86
 from .._linux_x86 import _stat as _stat_linux_x86
 from .._macos import _lstat as _lstat_macos
 from .._macos import _stat as _stat_macos
+from .._windows import _lstat as _lstat_windows
+from .._windows import _stat as _stat_windows
 from ..env import getenv
 from ..fstat import stat
 from ..os import sep
@@ -46,7 +48,9 @@ from ..os import sep
 
 @always_inline
 def _get_stat_st_mode(var path: String) raises -> Int:
-    comptime if CompilationTarget.is_macos():
+    comptime if CompilationTarget.is_windows():
+        return Int(_stat_windows(path^).st_mode)
+    elif CompilationTarget.is_macos():
         return Int(_stat_macos(path^).st_mode)
     elif CompilationTarget.has_neon():
         return Int(_stat_linux_arm(path^).st_mode)
@@ -56,7 +60,9 @@ def _get_stat_st_mode(var path: String) raises -> Int:
 
 @always_inline
 def _get_lstat_st_mode(var path: String) raises -> Int:
-    comptime if CompilationTarget.is_macos():
+    comptime if CompilationTarget.is_windows():
+        return Int(_lstat_windows(path^).st_mode)
+    elif CompilationTarget.is_macos():
         return Int(_lstat_macos(path^).st_mode)
     elif CompilationTarget.has_neon():
         return Int(_lstat_linux_arm(path^).st_mode)
