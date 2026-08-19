@@ -142,11 +142,20 @@ def build(dim: int, layers: int, name: str, out: pathlib.Path) -> tuple[pathlib.
     prev = "input_0"
     for i in range(layers):
         w = f"w_{i}"
-        # Deterministic small values; the point is size and dataflow, not maths.
-        # Built by tiling a 17-float period rather than packing element by
-        # element - at dim=4096 that is 16.7M struct.pack calls per layer, which
-        # takes minutes and dominates the whole run.
-        period = b"".join(struct.pack("<f", ((k % 17) - 8) / 64.0) for k in range(17))
+        # Deterministic values, scaled by 1/sqrt(dim) so each layer roughly
+        # PRESERVES magnitude.
+        #
+        # This scaling is not cosmetic. Without it a [1,D]x[D,D] layer amplifies
+        # by about sqrt(D) times the typical weight, which at D=4096 is ~4.5x per
+        # layer - so eight layers overflow into ~1e14 and sixteen are pure
+        # garbage. A run like that still prints "Finished Executing Graphs" and
+        # still produces a file, so it looks like a pass while making any
+        # CPU-vs-HTP comparison meaningless. Measured on 2026-08-19: the 512 MiB
+        # model disagreed 100% between backends for exactly this reason.
+        scale = 1.0 / (dim ** 0.5)
+        period = b"".join(
+            struct.pack("<f", (((k % 17) - 8) / 8.0) * scale) for k in range(17)
+        )
         total = dim * dim * 4
         buf = (period * (total // len(period) + 1))[:total]
         raws[w] = buf
