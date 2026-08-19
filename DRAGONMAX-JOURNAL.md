@@ -697,3 +697,96 @@ and re-enabling the NPU in Device Manager, but that is a system change and the
 user's call, not mine.
 
 After a reboot: run `htp_ceiling_sweep.ps1` and get the real number.
+
+---
+
+## 2026-08-19 — D3 resolved, and the MAX device ABI runs on Adreno
+
+### The decision
+
+**Objective set by the owner: WINMOJO's Mojo should drive our accelerated
+Snapdragon features, through a MAX-compatible interface, used the standard Mojo
+way.** That resolves D3, and it is a better-scoped target than "port MAX" —
+the seam is `device_context.mojo`, which is open, and implementing the symbols
+it calls makes `DeviceContext`, `DeviceBuffer` and `enqueue_function` work
+unchanged.
+
+### W2 — the runtime works
+
+`dragon/runtime/dragonrt.cpp` implements the 33-symbol bring-up subset over
+OpenCL. `test_dragonrt.c` drives it through `GetProcAddress` only, with no
+DragonMax header, so it exercises the ABI exactly as Mojo will find it.
+
+```
+all bring-up exports resolved
+  device : Qualcomm(R) Adreno(TM) X1-45 GPU
+  api    : adreno   id=0        ver=300  total=16163 MiB  maxAlloc=1024 MiB
+  [ok] createBuffer x/y/out, HtoD, loadFunction(saxpy),
+       enqueueFunctionDirect, synchronize, DtoH
+  [ok] all 4096 elements correct
+ALL PASS
+```
+
+Three things worth keeping from building it:
+
+- `loadFunction` sniffs the **SPIR-V magic number** `0x07230203` and routes to
+  `clCreateProgramWithIL`, otherwise treats the blob as OpenCL C. The source
+  path exists so the runtime is testable *before* KGEN emits SPIR-V. That
+  ordering means a codegen bug and a runtime bug can never be the same
+  investigation.
+- Launch dims are `uint32_t` because the bindings say so: Mojo has two launch
+  paths and if they disagree (i64 vs i32) a module composing both fails to
+  legalize.
+- Mojo speaks a CUDA-shaped grid-of-blocks; OpenCL wants global work-items. The
+  launch multiplies through.
+
+### W3 — Adreno is now a Mojo target, on paper
+
+Six edit sites, not the five `adding-gpu-targets.md` documents:
+
+1. `QualcommAdrenoFamily` — wave 64, **32 KiB** shared memory
+2. `_get_adreno_x1_target()` — triple `spirv64-unknown-unknown`,
+   `stdlib_plugin = "adreno"`
+3. `AdrenoX1` GPUInfo alias, `api="adreno"`, `sm_count=3`
+4. `"adreno-x1"` in the `_all_targets` canonical list
+5. `GPUInfo.target()` dispatch
+6. the arch-string → GPUInfo mapping in `_get_info_from_target`
+
+Plus `std/_plugin/adreno/` and its registration in `_overlay.mojo`'s
+`STD_PLUGINS`.
+
+**The data layout was emitted by LLVM, not written by hand** —
+`clang -target spirv64-unknown-unknown -S -emit-llvm` gives
+`e-i64:64-v16:16-...-n8:16:32:64-G1`, exactly the "query LLVM/Clang" method the
+guide recommends. Given how many guessed constants have bitten this project,
+that mattered.
+
+The family's `warp_size=64` carries a caveat in its own docstring: Vulkan says
+64, but OpenCL's preferred multiple comes back per-kernel as 64 **or** 128 on
+this device. It is not a device constant, and kernels that care must query.
+
+### The gap that stops this compiling today
+
+`info.mojo` carries a SYNC comment: the canonical target list must match
+"the TargetTraits accelerator tables in `KGEN/lib/Target/`". Those tables are
+**not in the published KGEN** — `grep` for `apple-m4` or `gfx942` across all of
+`KGEN/**/*.{cpp,h,td}` finds only help text in `TargetOptions.td`.
+`TargetTraits.h` declares the interface (`supportedAcceleratorArchs()` returning
+`ArrayRef<AcceleratorArch>`), but the per-target subclasses that populate it are
+absent.
+
+So the stdlib now describes Adreno correctly, and the compiler will still reject
+`--target-accelerator=adreno-x1` until that table is reachable. **That is the
+next real obstacle, and it is a fresh instance of the same compile-side-open /
+run-side-closed split — except this time it is the accelerator registry.**
+
+Worth being precise: this does not block the runtime, which is done and tested.
+It blocks *Mojo-authored* kernels reaching it. Hand-written OpenCL C already
+runs through the same ABI today.
+
+### Next
+
+Find where `supportedAcceleratorArchs()` is populated — a generated file, an
+unpublished subclass, or something reachable from `MAttrs.td`. That determines
+whether Mojo can be taught a new accelerator at all, and it is the single most
+important open question for this objective.
