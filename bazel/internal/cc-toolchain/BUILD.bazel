@@ -194,6 +194,7 @@ cc_args(
         "@rules_cc//cc/toolchains/actions:compile_actions",
     ],
     allowlist_include_directories = [
+        "@clang-windows-arm64//:include_dir",
         "@sysroot-windows-arm64//vc_include:dir",
         "@sysroot-windows-arm64//sdk_ucrt:dir",
         "@sysroot-windows-arm64//sdk_shared:dir",
@@ -201,6 +202,18 @@ cc_args(
         "@sysroot-windows-arm64//sdk_winrt:dir",
     ],
     args = [
+        # clang's own builtin headers must precede the MSVC ones. MSVC ships its
+        # own arm_neon.h, which declares the neon_* intrinsics as extern
+        # functions that only the Microsoft compiler intrinsifies, and defines
+        # uint8x16_t and friends as the __n128 *union* rather than a vector
+        # type. With vc_include searched first, #include <arm_neon.h> picked up
+        # Microsoft's, which is why NEON code across LLVM, abseil, BLAKE3 and
+        # boringssl either failed to compile on union arithmetic or linked with
+        # undefined neon_xtn, neon_umov and similar. -resource-dir alone does
+        # not fix this: clang searches its builtin include directory after
+        # -isystem paths, not before.
+        "-isystem",
+        "{clang_include}",
         "-isystem",
         "{vc_include}",
         "-isystem",
@@ -213,6 +226,7 @@ cc_args(
         "{sdk_winrt}",
     ],
     data = [
+        "@clang-windows-arm64//:include",
         "@sysroot-windows-arm64//vc_include:files",
         "@sysroot-windows-arm64//sdk_ucrt:files",
         "@sysroot-windows-arm64//sdk_shared:files",
@@ -220,6 +234,7 @@ cc_args(
         "@sysroot-windows-arm64//sdk_winrt:files",
     ],
     format = {
+        "clang_include": "@clang-windows-arm64//:include_dir",
         "vc_include": "@sysroot-windows-arm64//vc_include:dir",
         "sdk_ucrt": "@sysroot-windows-arm64//sdk_ucrt:dir",
         "sdk_shared": "@sysroot-windows-arm64//sdk_shared:dir",
