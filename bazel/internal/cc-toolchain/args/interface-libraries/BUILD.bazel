@@ -55,10 +55,21 @@ cc_args(
     requires_not_none = "@rules_cc//cc/toolchains/variables:generate_interface_library",
 )
 
+# --modular-ifs-* are not compiler flags: linker-driver.sh strips them and runs
+# llvm-ifs to synthesise an interface library. Windows has no use for that. The
+# import library that lld-link emits alongside a DLL *is* the interface library,
+# so the output path is handed straight to the linker with /IMPLIB: and the
+# input path is not needed at all, since the linker already knows what it is
+# producing. Doing this in the args rather than in a wrapper matters: link
+# actions deliberately bypass the .bat wrapper to escape cmd.exe's 8191
+# character limit.
 cc_args(
     name = "input_arg",
     actions = ["@rules_cc//cc/toolchains/actions:dynamic_library_link_actions"],
-    args = ["--modular-ifs-input={interface_library_input_path}"],
+    args = select({
+        "@platforms//os:windows": [],
+        "//conditions:default": ["--modular-ifs-input={interface_library_input_path}"],
+    }),
     format = {"interface_library_input_path": "@rules_cc//cc/toolchains/variables:interface_library_input_path"},
     requires_any_of = [":supports_interface_shared_libraries"],
     requires_not_none = "@rules_cc//cc/toolchains/variables:interface_library_input_path",
@@ -67,7 +78,10 @@ cc_args(
 cc_args(
     name = "output_arg",
     actions = ["@rules_cc//cc/toolchains/actions:dynamic_library_link_actions"],
-    args = ["--modular-ifs-output={interface_library_output_path}"],
+    args = select({
+        "@platforms//os:windows": ["-Wl,/IMPLIB:{interface_library_output_path}"],
+        "//conditions:default": ["--modular-ifs-output={interface_library_output_path}"],
+    }),
     format = {"interface_library_output_path": "@rules_cc//cc/toolchains/variables:interface_library_output_path"},
     requires_any_of = [":supports_interface_shared_libraries"],
     requires_not_none = "@rules_cc//cc/toolchains/variables:interface_library_output_path",
