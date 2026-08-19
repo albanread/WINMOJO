@@ -252,7 +252,17 @@ cc_args(
         # assumed x64 and rejected every input it was given, reporting
         # "machine type arm64 conflicts with x64" against objects that were all
         # correctly ARM64, including the CRT's own.
-        "@platforms//os:windows": ["-Wl,/MACHINE:ARM64"],
+        #
+        # -fms-runtime-lib must be repeated here: the clang driver makes its
+        # own CRT choice when it constructs the lld-link line, defaulting to
+        # -defaultlib:libcmt. Stating it only for compiles produces a mixed
+        # link — objects demanding __imp_ CRT symbols against a static libucrt
+        # — where every small function nothing referenced statically (strtoull,
+        # isxdigit, _fpclass) becomes an undefined import.
+        "@platforms//os:windows": [
+            "-Wl,/MACHINE:ARM64",
+            "-fms-runtime-lib=dll",
+        ],
     }) + select({
         # Sanitizers are split across multiple libraries, some of which aren't linked to shared libraries
         "//:asan_linux": ["-Wl,-z,undefs"],
