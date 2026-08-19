@@ -1142,3 +1142,56 @@ After the four: 477 targets analyzed, zero errors, 366 test targets running.
 The compiler is now compiling and executing its own test suite on Windows
 ARM64, which — whatever the pass rate turns out to be — is a sentence that
 could not have been written this morning.
+
+## Peeling the test stack: six layers to the first green tests
+
+With analysis unblocked, the strategy switched to probing: run two or three
+representative tests, read the first error, fix that one layer, run again.
+Six layers deep, the first tests passed. In order:
+
+**Layer 1 — the build id.** 238 of 366 targets failed with "No build id note
+found": mojo build fingerprints every binary for MEF cache invalidation, the
+Windows fingerprint is the CodeView RSDS record, and links carry no debug
+directory by default. `/BUILD-ID` on the link line writes a content-hash
+RSDS without a PDB — COFF's spelling of the `--build-id=md5` the Linux args
+always had.
+
+**Layer 2 — the silent alwayslink.** Next error: "target
+'aarch64-pc-windows-msvc' is not supported by this build", from a registry
+populated by static initializers — RegisterTargetLowering globals in
+alwayslink libraries. Bazel spells alwayslink as GNU --whole-archive
+brackets, and lld-link had been warning-and-ignoring them in every link of
+the entire port. No registrar survived archive elision; the registry was
+empty. lld-link has no bracketing switches, so a rules_cc patch teaches the
+libraries_to_link args the COFF form, /wholearchive:<lib> on the library
+argument itself, mirroring the Apple -force_load mechanism that sits right
+beside it in the same file.
+
+**Layer 3 — the stdlib's first real Windows gap.** test_int then failed to
+link over clock_gettime_nsec_np, a Darwin-only symbol, reached because the
+time module's dispatch reads "if Linux ... else macOS". time.mojo now has a
+Windows implementation of all five clock ids — QueryPerformanceCounter for
+the monotonic pair, GetSystemTimePreciseAsFileTime rebased from 1601 for
+realtime, GetProcessTimes/GetThreadTimes for cputime — and sleep() maps to
+Sleep. Upstream's own test_time passes against it.
+
+**Layer 4 — the manifest nobody can read.** Tests then died at startup,
+STATUS_DLL_NOT_FOUND: compiled tests import KGENCompilerRTShared.dll, which
+exists only as a line in a runfiles MANIFEST, and the OS loader does not
+read manifests. A rules_mojo patch materializes dependency DLLs beside each
+test executable.
+
+**Layers 5 and 6 — lit's POSIX reflexes.** FileCheck discovery needed three
+separate corrections: resolve llvm_tools_dir through the runfiles library
+rather than a cwd-relative path; restore PATHEXT to the scrubbed test
+environment, because lit's which() only tries the .exe suffix when it is
+set; and give the lit configs' libpython/PYTHONPATH blocks Windows branches
+— INSTSONAME does not exist there and rules_python's bin/lib layout is a
+POSIX shape, so both now derive from the interpreter that is already
+running the configuration.
+
+After six: test_int passes, test_time passes, and the first lit compile-fail
+test passes — the last one meaning a test successfully ran `mojo` itself,
+with the whole SDK-configuration environment (import paths, shared library
+link arguments, CompilerRT path) working on Windows. The full census is
+running.
