@@ -88,9 +88,18 @@ _MOJO_LINKOPTS = select({
         "-Wl,--export-dynamic-symbol=__jit_debug_*",
         "-Wl,--export-dynamic-symbol=mlir*",
     ],
-    # Debug/RPCClient.cpp talks to the debug server over a socket, and on
-    # Windows the sockets API lives in ws2_32 rather than in libc.
-    "@platforms//os:windows": ["-lws2_32"],
+    # System libraries the Windows build needs at the final link:
+    #   ws2_32   Debug/RPCClient.cpp talks to the debug server over a socket,
+    #            and the sockets API is not in libc here.
+    #   iphlpapi Support/lib/Threading/HWInfo.cpp calls GetAdaptersInfo to
+    #            collect MAC addresses.
+    #   normaliz curl is built with USE_WIN32_IDN, which resolves IdnToAscii
+    #            and IdnToUnicode from this library.
+    "@platforms//os:windows": [
+        "-lws2_32",
+        "-liphlpapi",
+        "-lnormaliz",
+    ],
     "//conditions:default": [],
 })
 

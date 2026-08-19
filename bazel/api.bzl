@@ -164,7 +164,21 @@ def modular_cc_library(name, data = [], deps = [], internal_deps = [], defines =
 
     _modular_cc_library(
         name = name,
-        local_defines = _process_defines(local_defines),
+        # MODULAR_NO_EXPORT on Windows. SymbolExport.h expands
+        # MODULAR_CXX_EXPORT to __declspec(dllimport) whenever
+        # MODULAR_BUILDING_LIBRARY is absent, and that define is only set when
+        # building a shared library, so every static library compiled its own
+        # definitions as dllimport and mojo.exe failed to link against them.
+        # MODULAR_NO_EXPORT is the switch that header already provides for this
+        # case, described there as needed because MSVC does not allow
+        # dllimport/dllexport on static library members.
+        #
+        # Appended after _process_defines rather than passed through it, since
+        # that helper cannot parse a select nested inside a select.
+        local_defines = _process_defines(local_defines) + select({
+            "@platforms//os:windows": ["MODULAR_NO_EXPORT"],
+            "//conditions:default": [],
+        }),
         defines = _process_defines(defines),
         **(kwargs | _process_cc_deps(
             data = data,
