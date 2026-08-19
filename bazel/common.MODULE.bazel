@@ -132,6 +132,12 @@ single_version_override(
         "//bazel/public-patches:grpc-warnings.patch",
         # TODO: Drop when this is in a release: https://github.com/grpc/grpc/commit/a1e64a2ed6a81c2f51b65c4d28b265db5892dfec
         "//bazel/public-patches:grpc-loads.patch",
+        # grpc asks for Python 3.9 and 3.10 toolchains and a pip hub for each.
+        # rules_python publishes no aarch64-pc-windows-msvc runtime below 3.11,
+        # so those toolchains never register and resolving the hub fails before
+        # anything is compiled. 3.11 through 3.13 all exist on every platform we
+        # target, and grpc's own default (its last entry) stays 3.13.
+        "//bazel/public-patches:grpc-python-versions.patch",
     ],
     version = "1.76.0.bcr.1",
 )
