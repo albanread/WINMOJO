@@ -34,6 +34,43 @@ How the pieces fit, what we build, and why. Derived from the recon in
 included. That is the single most important structural fact, and it means
 codegen is a matter of work rather than of access.
 
+## The QAIRT finding: one API already spans all three processors
+
+Measured 2026-08-19 after obtaining the SDK. QAIRT ships **CPU, GPU *and* HTP
+backends for `aarch64-windows-msvc`**, all behind the same
+`QnnInterface_getProviders` table:
+
+| DLL | Backend | id | backend API |
+|---|---|---|---|
+| `QnnCpu.dll` | `CPU_QTI_AISW` | 3 | 1.1.0 |
+| `QnnGpu.dll` | `GPU_QTI_AISW` | 4 | 3.12.0 |
+| `QnnHtp.dll` | `HTP_QTI_AISW` | 6 | 5.41.0 |
+| `QnnIr.dll` | `IR_QTI_AISW` | 9 | 0.1.0 |
+| `QnnSaver.dll` | `SAVER_QTI_AISW` | 2 | 1.1.0 |
+
+All five load and answer in a native ARM64 process
+(`dragon/probe/probe_qnn_backends.py`). `QnnGpu` was **not** in the
+GenieX-bundled runtime — it is new capability from the SDK, and it is the piece
+that makes NPU *and* GPU reachable without writing two runtimes.
+
+This reshapes the plan. Where the original design needed a bespoke device
+runtime over OpenCL for the GPU **plus** a separate QNN path for the NPU, one
+QNN-based execution layer can cover both — and the CPU as a bonus. Qualcomm
+already wrote and shipped it for this exact platform triple.
+
+**What this does not settle.** Loading is not executing. Still unproven:
+whether each backend builds and runs a real graph; how `QnnGpu`'s
+graph-at-a-time model compares to the 41.9 GFLOP/s our own OpenCL kernel
+reached in D2; and what op coverage differs between backends. A graph API may
+well be *worse* than direct dispatch for GPU compute — that is exactly what D2
+exists to compare against.
+
+**Version trap, recorded because it reads backwards.** The package version is
+not the API version. Package `2.42.0.251225` declares `QNN_API_VERSION 2.32.0`
+in `QnnCommon.h`, while the GenieX bundle reports core **2.34.0** — so the
+older-looking bundle is the *newer* API. Build against the SDK headers and run
+against the SDK's own DLLs so the two match.
+
 ## Codegen: three surfaces, three routes
 
 | Surface | Route | Backend exists? | Precedent |

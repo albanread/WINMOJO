@@ -4,6 +4,37 @@ What we intend to support, in what order, and what each step depends on.
 Companion to `ARCHITECTURE.md`; the gate ladder itself lives in
 `../../DRAGONMAX.md`.
 
+## Direction set 2026-08-19: NPU **and** GPU
+
+The owner's framing, in two parts. First: *the NPU is our best hardware here,
+and combined with 32 GB of RAM it makes MAX somewhat useful* — 45 TOPS, and it
+runs small models quickly. Second, and correcting an over-rotation in an
+earlier draft of this document: **do not write the GPU off; we want NPU and GPU
+support ideally.**
+
+So the target is **both**, and D2 supports that — the Adreno measured 3.37x the
+CPU on fp32 matmul. Neither surface is a phase-two afterthought.
+
+This lands closer to candidate **B** (one runtime spanning the processors) than
+to C (NPU-only narrow), and the QAIRT finding below makes B much cheaper than
+it looked: Qualcomm already ships CPU, GPU and HTP backends behind a single API
+for this exact platform.
+
+**The 32 GB unified-memory point is the strategic one.** On a discrete-GPU
+machine, model size is capped by VRAM. Here every processor addresses the same
+31.6 GiB, so a model that fits in RAM is reachable by CPU, Adreno and Hexagon
+alike, with no copy. D2 measured that directly: a 4 MiB round trip costs 1.2 ms
+against a 51 ms kernel — 2%.
+
+**One caveat, recorded rather than glossed over.** Prior measurement on this box
+found full NPU offload needing the model under **~5 GB**, with a 26B partial
+offload failing outright (`dspqueue_read 0x72`). If that ceiling is a property
+of the HTP or its driver, 32 GB of RAM does not lift it and the NPU stays a
+small-model device regardless. If it is a limitation of llama.cpp's ggml-hexagon
+backend, then a QNN-native path may not hit it at all. **Which of those is true
+is currently unknown, it is cheap to test with the SDK now in hand, and it
+bounds the whole NPU line — so W4 should answer it first.**
+
 ## Support matrix — the target state
 
 Honest about tiers. Not everything is worth supporting, and saying so early
@@ -86,8 +117,15 @@ Done when: a trivial Mojo GPU kernel compiles to SPIR-V and runs via W2.
 record of what that cost on the second vendor; Adreno has no hostcall mechanism
 either. Do not put it on the critical path — plan for kernels that cannot print.
 
-### W4 · QNN harness and graph lowering
-**Blocks:** the NPU line. **Needs:** D1b only. **Independent of Mojo.**
+### W4 · QNN harness and graph lowering — **now the lead work item**
+**Blocks:** the NPU line. **Needs:** the QAIRT SDK. **Independent of Mojo.**
+
+**W4.0, before anything else: find the real model-size ceiling on the HTP.**
+Allocate and execute against progressively larger weight sets through QNN until
+it fails, and record where and how. Everything downstream — which models are
+even candidates, whether 32 GB of RAM helps the NPU at all, whether the D0
+`~5 GB` figure is a QNN limit or a ggml-hexagon one — depends on that number.
+It is a day's work and it can invalidate months of the wrong plan.
 
 Build a graph → QNN IR → context binary → execute path. Pin the runtime version:
 D1a measured `HTP_QTI_AISW` core 2.34.0 / backend 5.45.0, and context binaries

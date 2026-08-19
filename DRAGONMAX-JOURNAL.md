@@ -386,3 +386,84 @@ until something independent confirms it.
 
 D1b's remaining half: a trivial graph on HTP V81 through QNN. That is also the
 start of W4, and it needs no `mojo.exe`.
+
+---
+
+## 2026-08-19 — QAIRT SDK obtained; one API covers NPU **and** GPU
+
+### Where the SDK came from
+
+Qualcomm's own Windows-on-Snapdragon repo, [quic/wos-ai], has
+`Scripts/qnn_setup.ps1`, which downloads QAIRT from a **direct public URL with
+no account and no token**:
+
+```
+https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/
+Qualcomm_AI_Runtime_Community/All/2.42.0.251225/v2.42.0.251225.zip
+```
+
+1,543,955,191 bytes (1.44 GB), 3.48 GB extracted, 10,910 entries. Installed to
+`C:\Qualcomm\AIStack\qairt\2.42.0.251225`, matching Qualcomm's own convention;
+`QNN_SDK_ROOT` persisted to the user environment.
+
+Practical note: **`HEAD` on that URL returns 403 while `GET` works.** A ranged
+`GET` (206) is the way to check size without pulling the whole file.
+
+### The finding that changes the architecture
+
+QAIRT ships **CPU, GPU and HTP backends for `aarch64-windows-msvc`, behind one
+interface**. All five load and answer in a native ARM64 process:
+
+| DLL | Provider | id | backend API |
+|---|---|---|---|
+| `QnnCpu.dll` | `CPU_QTI_AISW` | 3 | 1.1.0 |
+| `QnnGpu.dll` | `GPU_QTI_AISW` | 4 | 3.12.0 |
+| `QnnHtp.dll` | `HTP_QTI_AISW` | 6 | 5.41.0 |
+| `QnnIr.dll` | `IR_QTI_AISW` | 9 | 0.1.0 |
+| `QnnSaver.dll` | `SAVER_QTI_AISW` | 2 | 1.1.0 |
+
+**`QnnGpu` was not in the GenieX bundle** — it is new capability, and it is
+exactly what the dual NPU+GPU goal needs. The original design had a bespoke
+OpenCL device runtime for the GPU *plus* a separate QNN path for the NPU. One
+QNN execution layer can cover both, and the CPU as well. Qualcomm already wrote
+it for this platform triple.
+
+Unproven, and not to be assumed: that each backend actually *builds and runs* a
+graph; how `QnnGpu`'s graph-at-a-time model compares with the **41.9 GFLOP/s**
+our own OpenCL kernel hit in D2; and how op coverage differs per backend. A
+graph API could easily be worse than direct dispatch for GPU compute. D2 is the
+yardstick for finding out.
+
+### Direction corrected
+
+An earlier draft of `PORTING-PLAN.md` over-rotated to "NPU first" on a partial
+reading. The actual direction is **NPU and GPU, both first-class** — the NPU at
+45 TOPS for small models, the Adreno at 3.37x the CPU. Both design docs fixed.
+This lands nearer candidate **B** than C, and the QAIRT finding makes B much
+cheaper than it looked.
+
+### Two version traps
+
+**1. The package number is not the API version.** Package `2.42.0.251225`
+declares `QNN_API_VERSION 2.32.0` in `QnnCommon.h`. The GenieX bundle reports
+core **2.34.0** — so the older-looking bundle is the *newer* API. Build against
+the SDK headers, run against the SDK's own DLLs, keep the pair matched.
+
+**2. I guessed the backend-id enum and got it wrong.** Written from memory as
+`{1: CPU, 2: GPU, 3: DSP, 4: HTA, 5: SAVER, 6: HTP}`, it was shifted by one and
+mislabelled every backend while looking entirely reasonable — CPU printed as
+"DSP", GPU as "HTA". The header says
+`NULL 0, REFERENCE 1, SAVER 2, CPU 3, GPU 4, DSP 5, HTP 6`. The raw ids in the
+probe output were right all along; only my map was wrong.
+
+Third time this shape of error has appeared in this project
+(QnnSystemInterface layout, the OpenCL ICD guess, now this). **We have the
+headers now — there is no longer any excuse for guessing at a constant.**
+
+### Next
+
+W4.0: find the real model-size ceiling on the HTP. The D0 measurement of
+`~5 GB` came from llama.cpp's ggml-hexagon backend; whether that limit belongs
+to the HTP, its driver, or that backend is unknown, and it bounds the whole NPU
+line. With the SDK in hand it is cheap to answer, and `bin/` ships
+`qnn-net-run` and the converters to answer it with.

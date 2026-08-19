@@ -138,8 +138,14 @@ work, no dependency on unpublished binaries, fully ours.
 binaries, HTP execution. Smallest scope, best payoff per the table above, and it
 matches what the hardware actually rewards.
 
-D2's numbers decide between B and C — specifically whether the Adreno X1-45
-earns its place. Work breakdown for both is in
+**Direction set 2026-08-19: NPU *and* GPU, both first-class.** The NPU is 45
+TOPS and runs small models quickly; the Adreno measured **3.37x the CPU** in D2.
+The 32 GB of unified memory is the strategic asset — every processor addresses
+the same RAM, so model size is not capped by VRAM as on a discrete GPU.
+
+That points at **candidate B**, and the QAIRT SDK makes B far cheaper than it
+looked: Qualcomm ships **CPU, GPU and HTP backends behind one API** for
+`aarch64-windows-msvc`, all verified loading here. Work breakdown in
 [`dragon/design/PORTING-PLAN.md`](dragon/design/PORTING-PLAN.md).
 
 ## Rules carried in from prior ports
