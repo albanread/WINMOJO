@@ -117,6 +117,9 @@ single_version_override(
     patches = [
         # FIXME: `@system_python` is a dev dep, but used in non-dev code
         "//bazel/public-patches:protobuf-dev-dep.patch",
+        # upb's AArch64 assembly fast path leaves LLVM unable to size the
+        # function for SEH unwind info on Windows ARM64.
+        "//bazel/public-patches:protobuf-upb-windows-arm64-asm.patch",
     ],
 )
 
@@ -151,6 +154,29 @@ single_version_override(
 # protoc-gen-validate copies grpc's Python block verbatim, so it needs the same
 # treatment for the same reason: no aarch64-pc-windows-msvc runtime exists below
 # 3.11, and its pgv_pip_deps hub cannot resolve a 3.9 interpreter.
+# On Windows __m128i is MSVC's __n128, a union, which
+# __builtin_nontemporal_store rejects even though ABSL_HAVE_BUILTIN reports the
+# builtin as available.
+single_version_override(
+    module_name = "abseil-cpp",
+    patch_strip = 1,
+    patches = [
+        "//bazel/public-patches:abseil-windows-arm64-nontemporal.patch",
+    ],
+    version = "20250814.2",
+)
+
+# xxhash's NEON compiler guard uses the "+w" constraint, which clang's
+# aarch64-pc-windows-msvc backend cannot lower.
+single_version_override(
+    module_name = "xxhash",
+    patch_strip = 1,
+    patches = [
+        "//bazel/public-patches:xxhash-windows-arm64-neon-guard.patch",
+    ],
+    version = "0.8.3.bcr.1",
+)
+
 # boringssl's util.bzl selects /std:c11 on Windows, the MSVC spelling that only
 # clang-cl accepts. Same root cause as the curl and zlib-ng patches. boringssl
 # arrives transitively rather than as a direct bazel_dep, so the version here is

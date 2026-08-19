@@ -1,0 +1,18 @@
+diff --git a/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel b/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel
+index 4213cf1..082c4a4 100644
+--- a/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel
++++ b/utils/bazel/llvm-project-overlay/llvm/BUILD.bazel
+@@ -406,6 +406,13 @@ cc_library(
+     ],
+     copts = llvm_copts,
+     defines = select({
++        # Windows ARM64 is aarch64 but cannot use the NEON path: blake3_neon.c
++        # calls __builtin_shufflevector on the results of vreinterpretq_*, and
++        # those resolve to MSVC's __n128 union rather than a clang vector type,
++        # so the compile fails with "first two arguments to
++        # '__builtin_shufflevector' must be vectors". BLAKE3 falls back to its
++        # portable implementation, which costs hashing throughput only.
++        "@platforms//os:windows": ["BLAKE3_USE_NEON=0"],
+         "@platforms//cpu:aarch64": [
+         ],
+         "//conditions:default": ["BLAKE3_USE_NEON=0"],

@@ -44,6 +44,10 @@ PATCHES = [
     # header-only exposure, the .cpp only uses header-defined type aliases,
     # not anything requiring OrcJIT's/JITLink's .cpp-defined symbols.
     "//bazel/public-patches:llvm-orcshared-sps-rtbridge-headers.patch",
+    # blake3_neon.c cannot compile for aarch64-pc-windows-msvc: its
+    # __builtin_shufflevector calls operate on MSVC's __n128 union rather than a
+    # clang vector type. Selects BLAKE3's portable implementation there.
+    "//bazel/public-patches:llvm-blake3-no-neon-windows.patch",
 ]
 
 def _llvm_source_impl(module_ctx):

@@ -698,3 +698,102 @@ working copy was a `--depth 1` clone and the pack was incomplete without the
 base commit's ancestors. `git fetch --unshallow upstream` fixed it: the history
 is now complete at 53,622 commits, which also makes future rebases onto upstream
 tractable.
+
+---
+
+## G4 — Compiling KGEN: the first two full builds (2026-08-19)
+
+Crashpad landed first (see below), then the whole compiler was pointed at the
+toolchain. Two full builds so far.
+
+| | actions | failed targets |
+| --- | --- | --- |
+| Build 1 | 8,734 / 8,738 | **484** |
+| Build 2 | in progress | **3** so far at 3,099 / 8,885 |
+
+Both were run with `--keep_going`, which matters: a multi-hour build that stops
+at the first error teaches you one thing, whereas one that continues inventories
+everything. Classifying ~2,000 errors from build 1 by normalising the messages
+(strip quoted identifiers and digits, then sort by frequency) reduced them to
+four causes.
+
+### The four systemic causes, in order of blast radius
+
+**1. MSVC flag dialect in third-party BUILD files — 1,633 errors.** curl passes
+its eight feature defines as `/DBUILDING_LIBCURL` and friends; boringssl's
+`util.bzl` passes `/std:c11`. Both spellings are clang-cl only. Under the
+ordinary clang driver a leading slash is a *file path*, so every affected
+translation unit died with `no such file or directory: '/DWIN32'`.
+
+This is the recurring bill for choosing the clang driver over clang-cl in G2,
+and it is still the right trade — clang-cl would have meant rewriting every
+GNU-style flag in `args/` and `features/`. Worth doing proactively: a scan of
+every external `BUILD`/`.bzl` for MSVC-style flags found only these two.
+grpc's are confined to an RBE toolchain config that is never used.
+
+**2. `NOMINMAX` — ~224 errors.** `windows.h` defines `min` and `max` as
+function-like macros, so `std::numeric_limits<size_t>::max()` becomes a macro
+invocation with the wrong arity. It surfaces either as "too few arguments
+provided to function-like macro invocation" or, more confusingly, as "invalid
+operands to binary expression". Almost all of it was boringssl.
+
+This belongs in the toolchain's `compile_args`, not per-target, because it has to
+hold for third-party code too. `WIN32_LEAN_AND_MEAN` went in beside it: it cuts
+compile time and, usefully, excludes `wincrypt.h`, whose `X509_NAME` and `PKCS7`
+macros collide with boringssl's own names.
+
+**3. `layering_check` had no standard library in the module map.** Windows got
+only clang's builtin headers, because MSVC has no `--sysroot` and G3 therefore
+paired it with no sysroot directory. The other platforms cover their standard
+library through exactly that directory, so on Windows every `#include <atomic>`
+or `<string>` belonged to no module and was rejected with "does not depend on a
+module exporting". Fixed by adding the MSVC STL and SDK directory targets to
+`builtin_module_map`.
+
+**4. `parse_headers` had no wrapper to create its marker.** The feature works by
+setting `PARSE_HEADER` and expecting the compiler wrapper to create that file;
+the `.sh` wrappers end with `touch "${PARSE_HEADER}"`. G2 bound `clang.exe`
+directly, so the marker never appeared and every header parse failed with "not
+all outputs were created". Fixed with `.bat` wrappers that mirror the shell
+ones — including resolving the compiler relative to the execution root, which is
+how the `.sh` version works too — and create the marker only on success.
+
+### The real C++ problems, and a pattern worth knowing
+
+Four dependencies needed source patches, and **every one of them already had a
+portable fallback sitting behind the failing branch**. In each case the fix was
+to correct an over-broad feature test rather than to write anything new.
+
+| Dependency | Failing construct | Why it breaks on Windows ARM64 |
+| --- | --- | --- |
+| xxhash | `__asm__("" : "+w" (var))` | clang cannot lower the NEON `"+w"` constraint: "don't know how to handle tied indirect register inputs" |
+| protobuf/upb | hand-written AArch64 assembly in `encode_longvarint` | LLVM cannot size a function containing inline asm, so SEH unwind emission fails |
+| abseil | `__builtin_nontemporal_store` | `__m128i` is MSVC's `__n128`, a *union*, which the builtin rejects |
+| LLVM BLAKE3 | `__builtin_shufflevector` | `vreinterpretq_*` yields `__n128` rather than a clang vector type |
+
+Two lessons generalise:
+
+- **`defined(__aarch64__) && defined(__clang__)` is true on Windows too.** Three
+  of these four guards assumed that combination implied a Unix-like ARM64
+  target. Adding `!defined(_WIN32)` was the whole fix in each case.
+- **MSVC's NEON types are unions, not vector types.** Anything using clang
+  vector builtins on `__m128i`/`uint8x16_t` will fail. abseil's case is
+  especially misleading: `ABSL_HAVE_BUILTIN(__builtin_nontemporal_store)`
+  reports the builtin as *present*, because it is — it just refuses this type.
+
+The upb one is the most interesting for this port specifically, because Windows
+ARM64 **requires** unwind data for every function. The failure is not cosmetic
+and cannot be waived; the assembly simply cannot be used here.
+
+### Method notes
+
+- `--nobuild` for analysis-only passes: each missing `select()` branch surfaces
+  in about a second rather than hours into a compile.
+- `--subcommands=pretty_print` to see the real command line. This found the
+  `-imsvc` bug and the collapsed `-isystem` paths immediately, after flag-level
+  guessing had failed on both.
+- **Generate patches with `git diff`, never by hand.** Hand-written unified-diff
+  hunk headers were wrong three times in a row here; copying the file into a
+  scratch git repo, editing it, and diffing is both faster and correct. Always
+  `git apply --check` before handing a patch to Bazel, since Bazel's failure
+  mode is a module-resolution error far from the cause.
