@@ -790,3 +790,93 @@ Find where `supportedAcceleratorArchs()` is populated — a generated file, an
 unpublished subclass, or something reachable from `MAttrs.td`. That determines
 whether Mojo can be taught a new accelerator at all, and it is the single most
 important open question for this objective.
+
+---
+
+## 2026-08-19 — correction: the accelerator list is NOT fixed in closed code
+
+Challenged on the W3 conclusion that Mojo's GPU targets are gated by
+unpublished KGEN tables. **The challenge was right. The claim was wrong.**
+Re-traced the whole path with the flag in hand this time, not one grep.
+
+### How `--target-accelerator` actually flows
+
+1. `Compilation.cpp:497` — the flag is read with `getLastArgValue` and stored
+   **verbatim**: `compilationOptions.targetAccelerator = targetAccelerator.str()`.
+   The only checks are "exactly one" and non-empty. **No table lookup.**
+2. `IREvaluator.cpp:183` — `POC::AcceleratorArch` returns
+   `StringAttr::get(elaborator->options.targetAccelerator)`. So the stdlib's
+   `_accelerator_arch()` receives the *flag string verbatim*.
+3. Validation happens **in the stdlib**, at comptime, in
+   `_get_info_from_target`'s constraint against `_all_targets` — the exact
+   file W3 already edited. Adding `"adreno-x1"` there was not cosmetic; it was
+   the actual gate.
+
+The `supportedAcceleratorArchs()` tables I called load-bearing feed exactly one
+thing: `printSupportedAccelerators()`, the help text behind
+`--print-supported-accelerators`. The SYNC comment keeps *help output* in sync
+with the stdlib list. Modular's per-vendor tables are indeed not published, but
+they gate nothing — they print.
+
+### The two real gates, both open
+
+**Gate 1 — `isMaxInstalled()`** (`TargetTraits.cpp` fatal-errors "please
+install MAX for accelerator support" on any accelerator request without it).
+Read the implementation, `Support/lib/Configuration.cpp:663`: it checks config
+key `max.lib_path`, then `max.package_root` for `lib/libmax.so` — and if **no
+config value exists at all**:
+
+```cpp
+// No value, so probably in bazel, pretend we have MAX.
+return true;
+```
+
+Default is TRUE. In a bazel-driven build — which WINMOJO is — the gate passes
+by itself. (Also note the probe hardcodes `.so`/`.dylib`; it has never met
+Windows.)
+
+**Gate 2 — the per-triple registries.** A `spirv64-unknown-unknown` module
+needs traits/lowering/backend that resolve its triple, or
+`TargetTraitsRegistry::lookup` errors "target not supported by this build".
+There are three registries, and each has a **complete open implementation as a
+template**:
+
+| Registry | Open template | Size |
+|---|---|---|
+| `TargetTraitsRegistry` | `Target/Host/HostTraits.{h,cpp}` | ~40 lines |
+| `TargetLoweringRegistry` | `KGENToLLVM/Target/Host/HostLowering.cpp` | small |
+| `TargetBackendRegistry` | `ObjectCompiler/Target/Host/HostBackend.cpp` | small |
+
+`HostTraits.matches()` claims x86/aarch64/arm/riscv; a `SpirvTraits` claiming
+`triple.isSPIRV()` is the same shape. And the LLVM backend list is
+`bazel/public-patches/llvm_project.bzl`:
+
+```python
+BACKENDS = ["AArch64", "RISCV", "X86"]
+```
+
+— a plain list with an `extra_targets` module hook already provided. Adding
+`"SPIRV"` is one line, and LLVM 22 carries the SPIR-V backend in-tree.
+
+### What Modular's MAX gate is actually about
+
+Their GPU support ships as prebuilt libraries with the MAX package
+(`libNVPTX.so` in the wheel, linux-only — seen in
+`modular_wheel_repository.bzl`). "Install MAX for accelerator support" means
+*their* closed traits/backends arrive with the wheel. The extension points those
+plug into are open, and nothing about them is vendor-locked.
+
+### Revised path to `mojo build --target-accelerator=adreno-x1`
+
+1. stdlib target + plugin — **done (W3)**
+2. `"SPIRV"` in the BACKENDS list — one line
+3. `SpirvTraits` + `SpirvLowering` + `SpirvBackend` modeled on the Host trio,
+   registered alongside it — bounded, all-open work
+4. `isMaxInstalled` — expected to pass by default under bazel; verify, patch
+   in-fork only if it doesn't
+
+Blocked on nothing except WINMOJO's G3–G6 producing a building compiler to put
+this into. The W3 journal entry's "next real obstacle" framing is retired.
+
+The recurring lesson, fourth instance: one grep is a hypothesis, not a finding.
+The difference this time is it got challenged before it shaped a plan.
