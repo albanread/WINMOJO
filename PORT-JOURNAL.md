@@ -797,3 +797,60 @@ and cannot be waived; the assembly simply cannot be used here.
   scratch git repo, editing it, and diffing is both faster and correct. Always
   `git apply --check` before handing a patch to Bazel, since Bazel's failure
   mode is a module-resolution error far from the cause.
+
+---
+
+## G5–G7 — The road to test results and a Python comparison (2026-08-19)
+
+The goal is now explicit: run the Mojo test suite on Windows ARM64, report how
+many pass, and compare performance against Python. That decomposes into three
+gates, and the recon for each is done.
+
+### What the test suite looks like
+
+**322 `.mojo` test files** under `mojo/stdlib/test`, plus a `benchmarks/` tree.
+Each test directory declares one `mojo_test` target per source file:
+
+```python
+[
+    mojo_test(name = src + ".test", srcs = [src], ...)
+    for src in glob(["*.mojo"])
+]
+```
+
+So once `mojo.exe` links, `bazel test //mojo/stdlib/test/...` gives a pass/fail
+count directly, with no new harness. Worth noting for honest reporting later:
+some tests already carry `target_compatible_with` constraints pinning them to
+Linux — `test_erf.mojo` and `test_tanh.mojo` among them — so those will be
+*skipped*, not failed, and the denominator on Windows is not 322.
+
+### G5: the stdlib has no concept of Windows
+
+`CompilationTarget` had `is_linux()` and `is_macos()` and nothing else, and every
+OS-specific value in the standard library flows through `platform_map`, which
+accepted only `linux` and `macos` arms. Until that changed, no stdlib code could
+express a Windows branch at all. `is_windows()` and a `windows` arm are now in,
+keyed off the target's `os` field, which is `windows` for
+`aarch64-pc-windows-msvc`.
+
+The substantive work is `std/sys/_libc.mojo`, which the whole FFI layer sits on.
+Four functions need Windows implementations, and three of them have semantics
+that differ in ways that are easy to get quietly wrong:
+
+| POSIX | Windows | Trap |
+| --- | --- | --- |
+| `dlopen(path, flags)` | `LoadLibraryA` | `dlopen(NULL, ...)` means "the main program" and maps to `GetModuleHandleA(NULL)`, not `LoadLibraryA(NULL)` |
+| `dlsym(handle, name)` | `GetProcAddress` | straightforward |
+| `dlclose(handle)` | `FreeLibrary` | **return values are inverted**: `dlclose` returns 0 on success, `FreeLibrary` returns non-zero on success |
+| `dlerror()` | `GetLastError` + `FormatMessage` | `dlerror` returns a string or NULL *and clears* the error; Windows returns a numeric code and does not |
+
+The `dlclose` inversion is the one most likely to produce a silently wrong port,
+since the failure would look like "unloading always fails" rather than a crash.
+
+### Sequencing note
+
+These stdlib changes are deliberately **not** being written ahead of a working
+`mojo.exe`. Mojo is unfamiliar enough that speculative code written with no way
+to compile it would mostly be guesswork, and the compiler is the thing that tells
+us whether the FFI declarations are right. The predicate work above is the
+exception: it is additive, mechanical, and needed regardless.
