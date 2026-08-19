@@ -234,7 +234,7 @@ private:
         LLVM::AddressOfOp::create(rewriter, op.getLoc(), wrapperFn);
     closureStruct = LLVM::InsertValueOp::create(
         rewriter, op.getLoc(), closureStruct, addressOfWrapperFunction,
-        static_cast<int64_t>(0));
+        rewriter.getDenseI64ArrayAttr({0}));
     Value one = LLVM::ConstantOp::create(rewriter, op.getLoc(),
                                          IntegerType::get(context, 8), 1);
     LLVM::AllocaOp envStruct =

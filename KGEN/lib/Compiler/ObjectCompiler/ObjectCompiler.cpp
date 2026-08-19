@@ -1335,6 +1335,11 @@ static ErrorOr<BufferRef> createSharedObject(BufferRef buf,
   std::filesystem::path sharedObjPath =
       std::filesystem::temp_directory_path(ec);
   sharedObjPath = sharedObjPath / sharedObjName;
+  // Stable narrow-string storage for the linker argument vector below. That
+  // vector holds StringRefs, which do not own their data, so it cannot borrow
+  // from a temporary; and path::c_str() is const wchar_t* on Windows, which
+  // does not convert to StringRef at all.
+  const std::string sharedObjPathStr = sharedObjPath.string();
 
   auto triple = llvm::Triple(options.targetTriple);
   std::string version = triple.getOSVersion().getAsString();
@@ -1366,7 +1371,7 @@ static ErrorOr<BufferRef> createSharedObject(BufferRef buf,
         args.push_back(options.emissionLinkOptions.c_str());
       args.push_back(objFilePath.c_str());
       args.push_back("-o");
-      args.push_back(sharedObjPath.c_str());
+      args.push_back(sharedObjPathStr);
       return args;
     }
     // Build ELF linker args, plus any backend-specific arguments.
@@ -1377,7 +1382,7 @@ static ErrorOr<BufferRef> createSharedObject(BufferRef buf,
       args.push_back(options.emissionLinkOptions.c_str());
     args.push_back(objFilePath.c_str());
     args.push_back("-o");
-    args.push_back(sharedObjPath.c_str());
+    args.push_back(sharedObjPathStr);
     return args;
   }();
 
@@ -1426,7 +1431,7 @@ static ErrorOr<BufferRef> createSharedObject(BufferRef buf,
   // Save to temp file if needed.
   if (failed(writeBytesToTempWithHash(options.saveTempsPrefix,
                                       std::string(".") +
-                                          sharedObjPath.stem().c_str() + ".so",
+                                          sharedObjPath.stem().string() + ".so",
                                       (*sharedObjBufOr)->getBuffer())))
     return Error("failed to write shared object binary to saveTemps");
 

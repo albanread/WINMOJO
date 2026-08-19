@@ -280,10 +280,13 @@ struct OperandNeedingOrigin {
     return sig.getArgConvention(argIdx);
   }
 
-  enum {
+  /// Fixed to size_t, the type of operandIdx that this is compared against.
+  /// Without it the underlying type is the compiler's choice, and it came out
+  /// signed against a size_t on Windows, which -Wsign-compare rejects.
+  enum : size_t {
     /// This is a sentinel representing the the "operand" that needs spilling is
     /// actually the ExprDest of the call, not an actual operand.
-    kExprDestOperandIdx = ~1ULL,
+    kExprDestOperandIdx = ~size_t{1},
   };
 };
 

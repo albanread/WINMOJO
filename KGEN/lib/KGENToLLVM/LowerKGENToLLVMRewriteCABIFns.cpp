@@ -73,8 +73,8 @@ static SmallVector<Value> reconstructCABIArguments(
           LLVMStructType::getLiteral(ctx, {arg1.getType(), arg2.getType()});
       Value alloca = createEntryAlloca(b, ptrType, origType, pairTy, dl);
       Value pair = UndefOp::create(b, pairTy);
-      pair = InsertValueOp::create(b, pair, arg1, size_t{0});
-      pair = InsertValueOp::create(b, pair, arg2, size_t{1});
+      pair = InsertValueOp::create(b, pair, arg1, b.getDenseI64ArrayAttr({0}));
+      pair = InsertValueOp::create(b, pair, arg2, b.getDenseI64ArrayAttr({1}));
       StoreOp::create(b, pair, alloca);
       reconstructed.push_back(LoadOp::create(b, origType, alloca));
     } else {

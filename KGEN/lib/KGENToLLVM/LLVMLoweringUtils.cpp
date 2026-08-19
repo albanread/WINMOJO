@@ -606,8 +606,11 @@ Value VariantHelper::materializeLLVMUnion(
     llvm_unreachable(
         "The first type in lowered union type must be non-aggregated.");
   }
+  // b.getDenseI64ArrayAttr rather than a bare integer: the position argument
+  // has both a DenseI64ArrayAttr and an ArrayRef<int64_t> overload, and an
+  // int64_t matches each of them equally well, so the call is ambiguous.
   content = LLVM::InsertValueOp::create(b, content, maxAlignV,
-                                        static_cast<int64_t>(0));
+                                        b.getDenseI64ArrayAttr({0}));
 
   if (tailingMem) {
     Value arrayV = LLVM::UndefOp::create(b, tailingMem);
@@ -1036,8 +1039,9 @@ static Value lowerStringToGlobalConstant(StringAttr strAttr,
       LLVM::BitcastOp::create(b, LLVM::LLVMPointerType::get(b.getContext()),
                               LLVM::AddressOfOp::create(b, global));
   Value structVal0 = LLVM::InsertValueOp::create(
-      b, b.getLoc(), undefOp, llvmString, static_cast<int64_t>(0));
-  return LLVM::InsertValueOp::create(b, b.getLoc(), structVal0, sizeVal, 1);
+      b, b.getLoc(), undefOp, llvmString, b.getDenseI64ArrayAttr({0}));
+  return LLVM::InsertValueOp::create(b, b.getLoc(), structVal0, sizeVal,
+                                     b.getDenseI64ArrayAttr({1}));
 }
 
 Value KGEN::materializeLLVMStruct(ImplicitLocOpBuilder &b, Type structType,
