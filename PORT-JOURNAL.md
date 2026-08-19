@@ -1104,3 +1104,41 @@ validation pass (0xC0000374), or never (the single "successful" run that
 started this chapter) depended on what the adjusted pointer happened to point
 at. The output was always complete because the corruption lived entirely in
 process teardown, after the .mojoc was written and closed.
+
+## 477 targets, zero tests: unblocking the analysis layer
+
+The first `bazelw test //mojo/stdlib/test/...` executed nothing. 470 of 477
+targets failed *analysis* — the phase before anything compiles or runs — from
+four independent causes, worth recording because each is a category:
+
+1. **The client environment is not the repository environment.** rules_shell
+   locates bash via BAZEL_SH, our wrapper sets BAZEL_SH, and yet: repository
+   rules read a separate environment that client variables never reach. The
+   shell toolchain repo cached "no shell", and @bazel_tools'
+   collect_coverage — an implicit input of every test target — failed
+   analysis, taking the entire graph down. `--repo_env=BAZEL_SH=...` in the
+   generated bazelrc fixes it, quoted, because the space in "Program Files"
+   otherwise splits the flag and the remainder parses as a target pattern.
+
+2. **Selects are closed sets.** The lit configuration's TARGET_TRIPLE select
+   enumerated linux-x86_64, linux-aarch64 and macos; a fourth platform is an
+   analysis error, not a fallthrough. One arm added.
+
+3. **A dependency that cannot exist should skip, not fail.** The prebuilt
+   max-core wheel has no windows-arm64 build, so the wheel repository's
+   aliases now resolve to a @platforms//:incompatible target on Windows.
+   Bazel propagates the incompatibility, and anything reaching for the wheel
+   is SKIPPED with a reason instead of erroring — honest bookkeeping until
+   DragonMax produces a native wheel.
+
+4. **"libpython" is a spelling, not a concept.** rules_mojo scans the hermetic
+   Python runtime for a file named libpython* so compiled tests can embed an
+   interpreter. Windows CPython calls it python312.dll. A patch on the
+   rules_mojo override accepts python3*.dll, excluding the python3.dll
+   stable-ABI stub. Python-interop tests stay gated off separately until a
+   hermetic CPython registers for the legacy toolchain type.
+
+After the four: 477 targets analyzed, zero errors, 366 test targets running.
+The compiler is now compiling and executing its own test suite on Windows
+ARM64, which — whatever the pass rate turns out to be — is a sentence that
+could not have been written this morning.
