@@ -140,5 +140,6 @@ makes peace with weather.
 ---
 
 *Built on a Lenovo IdeaCentre Mini that cost less than the graphics card this
-work is usually done on. It sits on the desk, fanless and blameless, running
-kernels correctly for a toolchain that does not know it exists yet.*
+work is usually done on. It sits on the desk, running kernels correctly for a
+toolchain that does not know it exists yet. The project does have fans — but
+only the spinning kind.*
