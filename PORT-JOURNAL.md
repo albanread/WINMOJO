@@ -976,3 +976,41 @@ DLLs.
 
 The cost: the flag changes every compile command line, so the entire C++ tree
 rebuilds and the disk cache starts cold.
+
+## Reconnaissance for the test phase
+
+Read the whole test stack top to bottom while the CRT rebuild ran, because the
+first `bazelw test` will fail somewhere and it is cheaper to know the terrain
+first. Findings, in decreasing order of certainty:
+
+**The denominator is honest.** 322 test files under `mojo/stdlib/test`; exactly
+one carries an OS gate (macOS), and the 36 `@platforms//:incompatible` selects
+are ASAN gates, not platform ones. Upstream did not quietly write a
+Linux-only test suite — nearly everything is expected to run.
+
+**Three test rule families.** `mojo_test` (45 uses) compiles the test to a
+native executable via the cc toolchain and runs it: our existing toolchain work
+covers it, DLL placement is the only open question. `mojo_filecheck_test` (14)
+pipes that binary through FileCheck/not — LLVM tools we already build — under a
+four-line bash script that Git Bash handles. `lit_tests` (15) is the deep one:
+it runs mojo *inside* the test, which drags in the whole SDK-configuration
+surface.
+
+**`mojo_test_environment.bzl` was built on two ELF assumptions.** It hands the
+test-time `mojo build` a comma-joined linker argument list containing shared
+library paths plus `-Xlinker,-rpath` pairs. PE breaks both halves: the file the
+linker reads (import .lib) is not the file the loader loads (.dll), and rpath
+does not exist. Fixed in Starlark: link arguments name the interface library,
+runfiles carry both files, no rpath on Windows.
+
+**One config key, two file kinds.** `MODULAR_MOJO_MAX_COMPILERRT_PATH` is
+consumed twice in C++: `ExecutionEngine` *loads* the file (wants the .dll) and
+`mojo-build` passes it to the *linker* (wants the .lib). On ELF one path serves
+both. The key stays pointed at the .dll and the link path will substitute the
+`.lib` sibling — a small Windows branch in mojo-build.cpp, queued until the
+rebuild finishes because that file is an input of the running build.
+
+**Deferred without evidence:** `lit.bzl` joins tool paths with `":"`, which is
+wrong for a Windows PATH but possibly split on ':' by lit itself; and the `uv`
+alias has no Windows case but only gates pip lockfile regeneration, nowhere
+near the stdlib tests. Both wait for a real failure before being touched.
