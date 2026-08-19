@@ -88,6 +88,13 @@ def _mojo_test_environment_implementation(ctx):
     shared_libs = []
     transitive_files = [depset([mojo_toolchain.lld])] + mojo_toolchain.all_tools
     compilerrt = None
+
+    # PE/COFF splits a shared library across two files: the .dll that loads at
+    # run time and the import .lib the linker reads. The link arguments below
+    # must therefore name the import library while the runfiles carry both
+    # files, and the -rpath pair is omitted entirely: there is no rpath in a
+    # PE binary, a DLL is found through the executable's directory and PATH.
+    is_windows = ctx.target_platform_has_constraint(ctx.attr._windows_constraint[platform_common.ConstraintValueInfo])
     cc_deps = mojo_toolchain.implicit_deps + ([ctx.attr._link_extra_lib] if ctx.attr._link_extra_lib else [])
     for lib in cc_deps:
         if CcInfo not in lib:
@@ -95,17 +102,21 @@ def _mojo_test_environment_implementation(ctx):
 
         for linker_input in lib[CcInfo].linking_context.linker_inputs.to_list():
             for library in linker_input.libraries:
-                transitive_files.append(depset([library.dynamic_library]))
-
                 if "CompilerRT" in lib.label.name:
                     compilerrt = library.dynamic_library
 
-                path = library.dynamic_library.path
+                link_file = library.dynamic_library
+                if is_windows:
+                    link_file = library.interface_library or library.dynamic_library
+                transitive_files.append(depset([library.dynamic_library, link_file]))
+
+                path = link_file.path
                 if ctx.attr.short_path:
-                    path = library.dynamic_library.short_path
+                    path = link_file.short_path
 
                 shared_libs.append(path)
-                shared_libs.append("-Xlinker,-rpath,-Xlinker,{}".format(paths.dirname(path)))
+                if not is_windows:
+                    shared_libs.append("-Xlinker,-rpath,-Xlinker,{}".format(paths.dirname(path)))
 
     # Cc libraries reached through the Mojo dependency graph rather than the
     # toolchain: CompilerRT comes in via `std`, and the AsyncRT bindings via
@@ -115,19 +126,23 @@ def _mojo_test_environment_implementation(ctx):
             if not library.dynamic_library:
                 continue
 
-            transitive_files.append(depset([library.dynamic_library]))
-
             # Matched on the library rather than the target name, because these
             # arrive through a merged CcInfo that no longer carries labels.
             if "KGENCompilerRTShared" in library.dynamic_library.basename:
                 compilerrt = library.dynamic_library
 
-            path = library.dynamic_library.path
+            link_file = library.dynamic_library
+            if is_windows:
+                link_file = library.interface_library or library.dynamic_library
+            transitive_files.append(depset([library.dynamic_library, link_file]))
+
+            path = link_file.path
             if ctx.attr.short_path:
-                path = library.dynamic_library.short_path
+                path = link_file.short_path
 
             shared_libs.append(path)
-            shared_libs.append("-Xlinker,-rpath,-Xlinker,{}".format(paths.dirname(path)))
+            if not is_windows:
+                shared_libs.append("-Xlinker,-rpath,-Xlinker,{}".format(paths.dirname(path)))
 
     if not compilerrt:
         fail("CompilerRT library not found")
@@ -187,6 +202,7 @@ mojo_test_environment = rule(
             default = "@bazel_tools//tools/cpp:link_extra_lib",
             providers = [CcInfo],
         ),
+        "_windows_constraint": attr.label(default = "@platforms//os:windows"),
     },
     toolchains = use_cpp_toolchain() + [
         "@bazel_tools//tools/test:default_test_toolchain_type",
