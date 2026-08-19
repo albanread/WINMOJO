@@ -545,7 +545,8 @@ std::vector<std::string> M::localMACs() {
   if (dwStatus == ERROR_SUCCESS) {
     PIP_ADAPTER_INFO pAdapterInfo = AdapterInfo;
     while (pAdapterInfo) {
-      macs.emplace_back(bytesToHexStr(pAdapterInfo->Address, pAdapterInfo->AddressLength);
+      macs.emplace_back(
+          bytesToHexStr(pAdapterInfo->Address, pAdapterInfo->AddressLength));
       pAdapterInfo = pAdapterInfo->Next;
     }
   }

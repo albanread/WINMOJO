@@ -27,6 +27,14 @@
 #include "mlir/IR/PatternMatch.h"
 #include <mlir/IR/Diagnostics.h>
 
+// The interpreter implements a write syscall op below. Windows spells it
+// _write and declares it in <io.h> rather than <unistd.h>.
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 using namespace M;
 using namespace KGEN;
 using namespace POP;
@@ -2847,7 +2855,12 @@ static ErrorTreeOrSuccess interpreterWrite(ExternalCallOp op,
   if (mem)
     return ErrorTree(op.getLoc(), mem.takeError());
   int size = static_cast<int>(nbytesOr.get());
+#ifdef _WIN32
+  int numWritten =
+      _write(fdOr.get(), (const void *)*mem, static_cast<unsigned int>(size));
+#else
   int numWritten = write(fdOr.get(), (const void *)*mem, size);
+#endif
   if (auto simdType = dyn_cast<SIMDType>(resultType)) {
     auto simdAttr = SIMDAttr::get(numWritten, simdType);
     state.mapResults(simdAttr);

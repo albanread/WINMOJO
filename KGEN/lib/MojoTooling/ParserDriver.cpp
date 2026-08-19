@@ -214,7 +214,9 @@ static ASTDecl *buildModuleOrPackageDecl(const std::filesystem::path &path,
   if (path.extension() == ".mojo") {
     SourceMgr &sourceMgr = sharedState.getSourceMgr();
     std::string fullPath;
-    int fileId = sourceMgr.AddIncludeFile(path, SMLoc(), fullPath);
+    // path.string(): AddIncludeFile takes a std::string, and on Windows
+    // filesystem::path converts to wstring rather than string implicitly.
+    int fileId = sourceMgr.AddIncludeFile(path.string(), SMLoc(), fullPath);
     if (!fileId)
       return nullptr;
     return buildModuleDecl(path, sourceMgr.getMemoryBuffer(fileId),
