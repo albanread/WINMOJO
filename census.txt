@@ -1,0 +1,413 @@
+﻿.\bazelw.cmd : WARNING: Option 'build_python_zip' is deprecated: The '--no' prefix is no longer supported for this 
+flag. Please use --build_python_zip=false instead.
+At line:3 char:1
++ .\bazelw.cmd test --keep_going --test_output=summary "//mojo/stdlib/t ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (WARNING: Option...=false instead.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+INFO: Invocation ID: 38ab0f63-30f2-482d-924b-08b5799c6c98
+INFO: Checking for file changes...
+Computing main repo mapping: 
+Loading: 
+Loading: 0 packages loaded
+Analyzing: 483 targets (0 packages loaded)
+Analyzing: 483 targets (0 packages loaded, 0 targets configured)
+Analyzing: 483 targets (0 packages loaded, 0 targets configured)
+
+INFO: Analyzed 483 targets (0 packages loaded, 0 targets configured).
+FAIL: //mojo/stdlib/test/collections/string/compile_fail:getitem_nonkw_single.mojo.test (Exit 2) (see C:/users/alban/_b
+azel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/compile_fai
+l/getitem_nonkw_single.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/collections/string/compile_fail:getitem_nonkw_slice.mojo.test (Exit 2) (see C:/users/alban/_ba
+zel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/compile_fail
+/getitem_nonkw_slice.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/collections/string/compile_fail:interior_origin_invalidation.mojo.test (Exit 2) (see C:/users/
+alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/com
+pile_fail/interior_origin_invalidation.mojo.test/test.log)
+[64 / 311] 63 / 369 tests, 3 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 1s local, 
+disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/builtin:test_sort.mojo.test (Exit -1073741795) (see C:/users/alban/_bazel_alban/rme75s5o/execr
+oot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/builtin/test_sort.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/collections/string/compile_fail:interior_origin_strip_invalidation.mojo.test (Exit 2) (see C:/
+users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/stri
+ng/compile_fail/interior_origin_strip_invalidation.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/collections/string/compile_fail:lit_tests.validate_lit_features (Exit 2) (see C:/users/alban/_
+bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/compile_fa
+il/lit_tests.validate_lit_features/test.log)
+[68 / 311] 67 / 369 tests, 6 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 2s local, 
+disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/collections/compile_fail:span_address_space_copy_ops.mojo.test (Exit 2) (see C:/users/alban/_b
+azel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/compile_fail/span_
+address_space_copy_ops.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/collections/string/compile_fail:interior_origin_split_invalidation.mojo.test (Exit 1) (see C:/
+users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/stri
+ng/compile_fail/interior_origin_split_invalidation.mojo.test/test.log)
+[77 / 311] 76 / 369 tests, 8 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 3s local, 
+disk-cache ... (8 actions running)
+[77 / 311] 76 / 369 tests, 8 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 5s local, 
+disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/collections/string:test_number_parsing_lut_optimization.mojo.test (Exit 2) (see C:/users/alban
+/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/test_num
+ber_parsing_lut_optimization.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/collections/string:lit_tests.validate_lit_features (Exit 1) (see C:/users/alban/_bazel_alban/r
+me75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/lit_tests.validate_lit_
+features/test.log)
+[79 / 311] 78 / 369 tests, 10 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 6s local, 
+disk-cache ... (8 actions running)
+[79 / 311] 78 / 369 tests, 10 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 8s local, 
+disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/collections/string:test_string_span_codepoint_grapheme_bounds_abort.mojo.test (Exit 2) (see C:
+/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/str
+ing/test_string_span_codepoint_grapheme_bounds_abort.mojo.test/test.log)
+[84 / 311] 83 / 369 tests, 11 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 9s local, 
+disk-cache ... (8 actions running)
+[84 / 311] 83 / 369 tests, 11 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 20s local, 
+disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/builtin:test_print_stderr.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroo
+t/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/builtin/test_print_stderr.mojo.test/test.log)
+[84 / 311] 84 / 369 tests, 12 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 35s local, 
+disk-cache ... (8 actions running)
+[99 / 311] 98 / 369 tests, 12 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 36s local, 
+disk-cache ... (8 actions running)
+[99 / 311] 98 / 369 tests, 12 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 38s local, 
+disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/io:test_file_descriptor.mojo.test (Exit -1073740791) (see C:/users/alban/_bazel_alban/rme75s5o
+/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/io/test_file_descriptor.mojo.test/test.log)
+[105 / 311] 104 / 369 tests, 13 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 39s local, 
+disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/builtin:test_print_long_string.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/ex
+ecroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/builtin/test_print_long_string.mojo.test/test.log)
+[105 / 311] 105 / 369 tests, 14 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 41s local, 
+disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/collections/string:test_string_span_bounds_abort.mojo.test (Exit 1) (see C:/users/alban/_bazel
+_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/test_string_spa
+n_bounds_abort.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/memory/pointer/compile_fail:address_space_unknown_name.mojo.test (Exit 2) (see C:/users/alban/
+_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/memory/pointer/compile_fail/
+address_space_unknown_name.mojo.test/test.log)
+[132 / 311] 131 / 369 tests, 16 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 42s local, 
+disk-cache ... (8 actions, 7 running)
+FAIL: //mojo/stdlib/test/collections/string:test_string_unicode_panic.mojo.test (Exit 1) (see C:/users/alban/_bazel_alb
+an/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/test_string_unicode
+_panic.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/memory/pointer/compile_fail:write_requires_trivially_deinitable.mojo.test (Exit 2) (see C:/use
+rs/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/memory/pointer/comp
+ile_fail/write_requires_trivially_deinitable.mojo.test/test.log)
+[139 / 311] 138 / 369 tests, 18 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 44s local, 
+disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/os:echo_support/echo.c.tidy (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/
+bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/echo_support/echo.c.tidy/test.log)
+[141 / 311] 140 / 369 tests, 19 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 45s local, 
+disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/sys:test_dlhandle.mojo.test (Exit -1073741795) (see C:/users/alban/_bazel_alban/rme75s5o/execr
+oot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/sys/test_dlhandle.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/ffi/compile_fail:test_external_call_num_fixed_args.mojo.test (Exit 2) (see C:/users/alban/_baz
+el_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/ffi/compile_fail/test_external_c
+all_num_fixed_args.mojo.test/test.log)
+[154 / 313] 153 / 369 tests, 21 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 46s local, 
+disk-cache ... (8 actions running)
+ERROR: C:/projects/winmojo/mojo/stdlib/test/math/BUILD.bazel:11:14: Linking 
+mojo/stdlib/test/math/test_ldexp.mojo.test.exe failed: (Exit 1): clang++.exe failed: error executing CppLink command 
+(from mojo_test rule target //mojo/stdlib/test/math:test_ldexp.mojo.test) 
+external\+http_archive+clang-windows-arm64\bin\clang++.exe 
+@bazel-out/arm64_windows-opt/bin/mojo/stdlib/test/math/test_ldexp.mojo.test.exe-0.params
+lld-link: error: undefined symbol: ldexpf
+>>> referenced by \mojo\stdlib\test\math\test_ldexp.mojo:65
+>>>               bazel-out/arm64_windows-opt/bin/mojo/stdlib/test/math/test_ldexp.mojo.test.lo:(test_ldexp::test_ldexp
+_extensive_float32())
+clang++: error: linker command failed with exit code 1 (use -v to see invocation)
+FAIL: //mojo/stdlib/test/memory/pointer/compile_fail:unsafe_from_address_0.mojo.test (Exit 2) (see C:/users/alban/_baze
+l_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/memory/pointer/compile_fail/unsaf
+e_from_address_0.mojo.test/test.log)
+[160 / 313] 158 / 369 tests, 23 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 47s local, 
+disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/builtin:test_issue_3908.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/
+_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/builtin/test_issue_3908.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/memory/pointer/compile_fail:unsafe_from_address_neg.mojo.test (Exit 2) (see C:/users/alban/_ba
+zel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/memory/pointer/compile_fail/uns
+afe_from_address_neg.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/collections:test_optional_none_abort.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75
+s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/test_optional_none_abort.mojo.test
+/test.log)
+[178 / 313] 176 / 369 tests, 26 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 48s local, 
+disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/collections:test_asan_annotations_list.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme
+75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/test_asan_annotations_list.mojo.
+test/test.log)
+FAIL: //mojo/stdlib/test/os:sleep_support/sleep.c.tidy (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/_mai
+n/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/sleep_support/sleep.c.tidy/test.log)
+FAIL: //mojo/stdlib/test/builtin:test_stdin.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/_main
+/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/builtin/test_stdin.mojo.test/test.log)
+ERROR: C:/projects/winmojo/mojo/stdlib/test/format/BUILD.bazel:6:14: //mojo/stdlib/test/format:test_format.mojo.test 
+compiling mojo object failed: (Exit 1): mojo.exe failed: error executing MojoCompile command (from mojo_test rule 
+target //mojo/stdlib/test/format:test_format.mojo.test) bazel-out\arm64_windows-opt\bin\KGEN\tools\mojo\mojo.exe build 
+-strip-file-prefix=. --emit object -o bazel-out/arm64_windows-opt/bin/mojo/stdlib/test/format/test_format.mojo.test.lo 
+--lld-path ... (remaining 10 arguments skipped)
+mojo\stdlib\test\format\test_format.mojo:14:17: error: unable to locate module 'reflection'
+from test_utils.reflection import SimplePoint, NestedStruct, EmptyStruct
+                ^
+C:\users\alban\_bazel_alban\rme75s5o\execroot\_main\bazel-out\arm64_windows-opt\bin\KGEN\tools\mojo\mojo.exe: error: 
+failed to parse the provided Mojo source module
+[218 / 316] 214 / 369 tests, 30 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 49s local, 
+disk-cache ... (8 actions, 7 running)
+FAIL: //mojo/stdlib/test/os:test_chdir.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/baze
+l-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/test_chdir.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/os:test_isatty.mojo.test (Exit -1073740791) (see C:/users/alban/_bazel_alban/rme75s5o/execroot
+/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/test_isatty.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/os:test_mkdir_and_rmdir.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/
+_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/test_mkdir_and_rmdir.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/sys:test_c_types.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/b
+azel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/sys/test_c_types.mojo.test/test.log)
+[226 / 319] 222 / 369 tests, 34 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 50s local, 
+disk-cache ... (8 actions running)
+[226 / 319] 222 / 369 tests, 34 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 52s local, 
+disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/hashlib:test_ahash.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/_main
+/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/hashlib/test_ahash.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/os:test_trap.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel
+-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/test_trap.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/pathlib:test_pathlib.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/_ma
+in/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/pathlib/test_pathlib.mojo.test/test.log)
+FAIL: //mojo/stdlib/test/memory/pointer/compile_fail:comparison_address_space.mojo.test (Exit 2) (see C:/users/alban/_b
+azel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/memory/pointer/compile_fail/co
+mparison_address_space.mojo.test/test.log)
+[237 / 319] 233 / 369 tests, 38 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 53s local, 
+disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/memory/pointer/compile_fail:lit_tests.validate_lit_features (Exit 2) (see C:/users/alban/_baze
+l_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/memory/pointer/compile_fail/lit_t
+ests.validate_lit_features/test.log)
+FAIL: //mojo/stdlib/test/subprocess:test_run.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/_mai
+n/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/subprocess/test_run.mojo.test/test.log)
+ERROR: C:/projects/winmojo/mojo/stdlib/test/pwd/BUILD.bazel:6:14: //mojo/stdlib/test/pwd:test_pwd.mojo.test compiling 
+mojo object failed: (Exit 1): mojo.exe failed: error executing MojoCompile command (from mojo_test rule target 
+//mojo/stdlib/test/pwd:test_pwd.mojo.test) bazel-out\arm64_windows-opt\bin\KGEN\tools\mojo\mojo.exe build 
+-strip-file-prefix=. --emit object -o bazel-out/arm64_windows-opt/bin/mojo/stdlib/test/pwd/test_pwd.mojo.test.lo 
+--lld-path ... (remaining 12 arguments skipped)
+mojo\stdlib\test\pwd\test_pwd.mojo:49:5: error: function instantiation failed
+def main() raises:
+    ^
+mojo\stdlib\test\pwd\test_pwd.mojo:20:5: note: function instantiation failed
+def test_pwuid() raises:
+    ^
+mojo\stdlib\test\pwd\test_pwd.mojo:22:48: note: call expansion failed
+    var passwd = std.pwd.getpwuid(std.os.getuid())
+                                               ^
+mojo/stdlib/std\os\os.mojo:279:5: note: function instantiation failed
+def getuid() -> Int:
+    ^
+mojo/stdlib/std\os\os.mojo:292:76: note: call expansion failed
+        CompilationTarget.unsupported_target_error[operation="os.getuid()"]()
+                                                                           ^
+mojo/stdlib/std\sys\info.mojo:73:9: note: constraint failed: Current compilation target does not support operation: 
+os.getuid(). Note: 
+        comptime assert False, String(msg, op_text, note_text)
+        ^
+C:\users\alban\_bazel_alban\rme75s5o\execroot\_main\bazel-out\arm64_windows-opt\bin\KGEN\tools\mojo\mojo.exe: error: 
+failed to run the pass manager
+[243 / 322] 237 / 369 tests, 41 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 54s local, 
+disk-cache ... (7 actions running)
+[248 / 322] 242 / 369 tests, 41 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 55s local, 
+disk-cache ... (8 actions running)
+ERROR: C:/projects/winmojo/mojo/stdlib/test/sys/BUILD.bazel:65:14: //mojo/stdlib/test/sys:test_ffi.mojo.test compiling 
+mojo object failed: (Exit 1): mojo.exe failed: error executing MojoCompile command (from mojo_test rule target 
+//mojo/stdlib/test/sys:test_ffi.mojo.test) bazel-out\arm64_windows-opt\bin\KGEN\tools\mojo\mojo.exe build 
+-strip-file-prefix=. --emit object -o bazel-out/arm64_windows-opt/bin/mojo/stdlib/test/sys/test_ffi.mojo.test.lo 
+--lld-path ... (remaining 12 arguments skipped)
+mojo\stdlib\test\sys\test_ffi.mojo:319:5: error: function instantiation failed
+def main() raises:
+    ^
+mojo\stdlib\test\sys\test_ffi.mojo:278:5: note: function instantiation failed
+def test_errno_message() raises:
+    ^
+mojo\stdlib\test\sys\test_ffi.mojo:284:9: note: constraint failed: test not implemented for the platform
+        comptime assert False, "test not implemented for the platform"
+        ^
+C:\users\alban\_bazel_alban\rme75s5o\execroot\_main\bazel-out\arm64_windows-opt\bin\KGEN\tools\mojo\mojo.exe: error: 
+failed to run the pass manager
+[251 / 322] 243 / 369 tests, 42 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 58s local, 
+disk-cache ... (7 actions running)
+[276 / 322] 268 / 369 tests, 42 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 59s local, 
+disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/builtin:test_file.mojo.test (Exit -1073741795) (see C:/users/alban/_bazel_alban/rme75s5o/execr
+oot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/builtin/test_file.mojo.test/test.log)
+[291 / 322] 283 / 369 tests, 43 failed; Testing //mojo/stdlib/test/benchmark:test_mojobench.mojo.test; 60s local, 
+disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/benchmark:test_mojobench.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot
+/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/benchmark/test_mojobench.mojo.test/test.log)
+[294 / 322] 286 / 369 tests, 44 failed; Testing //mojo/stdlib/test/memory/test_fail:alloc_zst_fail_tests.mojo.test; 
+22s local, disk-cache ... (8 actions running)
+[294 / 322] 286 / 369 tests, 44 failed; Testing //mojo/stdlib/test/memory/test_fail:alloc_zst_fail_tests.mojo.test; 
+24s local, disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/os:path/test_basename.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/_m
+ain/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/path/test_basename.mojo.test/test.log)
+[300 / 322] 292 / 369 tests, 45 failed; Testing //mojo/stdlib/test/memory/test_fail:alloc_zst_fail_tests.mojo.test; 
+25s local, disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/os:path/test_expanduser.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/
+_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/path/test_expanduser.mojo.test/test.log)
+[302 / 322] 294 / 369 tests, 46 failed; Testing //mojo/stdlib/test/memory/test_fail:alloc_zst_fail_tests.mojo.test; 
+27s local, disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/os:path/test_realpath.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/_m
+ain/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/path/test_realpath.mojo.test/test.log)
+[303 / 322] 295 / 369 tests, 47 failed; Testing //mojo/stdlib/test/memory/test_fail:alloc_zst_fail_tests.mojo.test; 
+28s local, disk-cache ... (8 actions running)
+[303 / 322] 295 / 369 tests, 47 failed; Testing //mojo/stdlib/test/memory/test_fail:alloc_zst_fail_tests.mojo.test; 
+31s local, disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/os:path/test_split.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/_main
+/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/path/test_split.mojo.test/test.log)
+[306 / 322] 298 / 369 tests, 48 failed; Testing //mojo/stdlib/test/memory/test_fail:alloc_zst_fail_tests.mojo.test; 
+32s local, disk-cache ... (8 actions running)
+[306 / 322] 298 / 369 tests, 48 failed; Testing //mojo/stdlib/test/memory/test_fail:alloc_zst_fail_tests.mojo.test; 
+35s local, disk-cache ... (8 actions running)
+FAIL: //mojo/stdlib/test/os:printenv_support/printenv.c.tidy (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroo
+t/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/printenv_support/printenv.c.tidy/test.log)
+FAIL: //mojo/stdlib/test/collections:test_span_bounds_abort.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5
+o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/test_span_bounds_abort.mojo.test/tes
+t.log)
+[316 / 322] 308 / 369 tests, 50 failed; Testing //mojo/stdlib/test/memory/test_fail:alloc_zst_fail_tests.mojo.test; 
+36s local, disk-cache ... (6 actions running)
+FAIL: //mojo/stdlib/test/memory/test_fail:alloc_zst_fail_tests.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme7
+5s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/memory/test_fail/alloc_zst_fail_tests.mojo.te
+st/test.log)
+[317 / 322] 309 / 369 tests, 51 failed; Testing //mojo/stdlib/test/os:test_no_trap.mojo.test; 27s local, disk-cache 
+... (5 actions running)
+FAIL: //mojo/stdlib/test/os:test_no_trap.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/ba
+zel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/test_no_trap.mojo.test/test.log)
+[317 / 322] 310 / 369 tests, 52 failed; Testing //mojo/stdlib/test/os:test_no_trap.mojo.test; 31s local, disk-cache 
+... (5 actions running)
+[318 / 322] 310 / 369 tests, 52 failed; Testing //mojo/stdlib/test/sys:test_compile_sanitize_address.mojo.test; 30s 
+local, disk-cache ... (4 actions running)
+FAIL: //mojo/stdlib/test/sys:test_compile_sanitize_address.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o
+/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/sys/test_compile_sanitize_address.mojo.test/test.
+log)
+[319 / 322] 311 / 369 tests, 53 failed; Testing 
+//mojo/stdlib/test/memory/test_fail:layout_invalid_alignment_abort.mojo.test; 31s local, disk-cache ... (3 actions 
+running)
+FAIL: //mojo/stdlib/test/memory/test_fail:layout_invalid_alignment_abort.mojo.test (Exit 1) (see C:/users/alban/_bazel_
+alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/memory/test_fail/layout_invalid_ali
+gnment_abort.mojo.test/test.log)
+[320 / 322] 312 / 369 tests, 54 failed; Testing //mojo/stdlib/test/collections:test_list_bounds_abort.mojo.test; 30s 
+local, disk-cache ... (2 actions running)
+FAIL: //mojo/stdlib/test/collections:test_list_bounds_abort.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5
+o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/test_list_bounds_abort.mojo.test/tes
+t.log)
+[321 / 322] 313 / 369 tests, 55 failed; Testing //mojo/stdlib/test/os:path/test_islink.mojo.test; 24s local, disk-cache
+FAIL: //mojo/stdlib/test/os:path/test_islink.mojo.test (Exit 1) (see C:/users/alban/_bazel_alban/rme75s5o/execroot/_mai
+n/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/path/test_islink.mojo.test/test.log)
+[321 / 322] 314 / 369 tests, 56 failed; Testing //mojo/stdlib/test/os:path/test_islink.mojo.test; 26s local, disk-cache
+INFO: Build succeeded for only 479 of 483 top-level targets
+INFO: Found 114 targets and 369 test targets...
+INFO: Elapsed time: 93.151s, Critical Path: 61.51s
+INFO: 57 processes: 258 action cache hit, 18 disk cache hit, 5 internal, 71 local.
+ERROR: Build did NOT complete successfully
+//mojo/stdlib/test/format:test_format.mojo.test                 FAILED TO BUILD
+//mojo/stdlib/test/math:test_ldexp.mojo.test                    FAILED TO BUILD
+//mojo/stdlib/test/pwd:test_pwd.mojo.test                       FAILED TO BUILD
+//mojo/stdlib/test/sys:test_ffi.mojo.test                       FAILED TO BUILD
+//mojo/stdlib/test/benchmark:test_mojobench.mojo.test                    FAILED in 59.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/benchmark/test_mojobench.mojo.test/test.log
+//mojo/stdlib/test/builtin:test_file.mojo.test                           FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/builtin/test_file.mojo.test/test.log
+//mojo/stdlib/test/builtin:test_issue_3908.mojo.test                     FAILED in 45.3s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/builtin/test_issue_3908.mojo.test/test.log
+//mojo/stdlib/test/builtin:test_print_long_string.mojo.test              FAILED in 39.4s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/builtin/test_print_long_string.mojo.test/test.log
+//mojo/stdlib/test/builtin:test_print_stderr.mojo.test                   FAILED in 32.8s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/builtin/test_print_stderr.mojo.test/test.log
+//mojo/stdlib/test/builtin:test_sort.mojo.test                           FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/builtin/test_sort.mojo.test/test.log
+//mojo/stdlib/test/builtin:test_stdin.mojo.test                          FAILED in 46.6s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/builtin/test_stdin.mojo.test/test.log
+//mojo/stdlib/test/collections:test_asan_annotations_list.mojo.test      FAILED in 38.4s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/test_asan_annotations_list.mojo.test/test.log
+//mojo/stdlib/test/collections:test_list_bounds_abort.mojo.test          FAILED in 28.6s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/test_list_bounds_abort.mojo.test/test.log
+//mojo/stdlib/test/collections:test_optional_none_abort.mojo.test        FAILED in 0.6s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/test_optional_none_abort.mojo.test/test.log
+//mojo/stdlib/test/collections:test_span_bounds_abort.mojo.test          FAILED in 28.7s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/test_span_bounds_abort.mojo.test/test.log
+//mojo/stdlib/test/collections/compile_fail:span_address_space_copy_ops.mojo.test FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/compile_fail/span_address_space_copy_ops.mojo.test/test.log
+//mojo/stdlib/test/collections/string:lit_tests.validate_lit_features    FAILED in 2.9s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/lit_tests.validate_lit_features/test.log
+//mojo/stdlib/test/collections/string:test_number_parsing_lut_optimization.mojo.test FAILED in 0.3s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/test_number_parsing_lut_optimization.mojo.test/test.log
+//mojo/stdlib/test/collections/string:test_string_span_bounds_abort.mojo.test FAILED in 36.9s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/test_string_span_bounds_abort.mojo.test/test.log
+//mojo/stdlib/test/collections/string:test_string_span_codepoint_grapheme_bounds_abort.mojo.test FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/test_string_span_codepoint_grapheme_bounds_abort.mojo.test/test.log
+//mojo/stdlib/test/collections/string:test_string_unicode_panic.mojo.test FAILED in 35.7s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/test_string_unicode_panic.mojo.test/test.log
+//mojo/stdlib/test/collections/string/compile_fail:getitem_nonkw_single.mojo.test FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/compile_fail/getitem_nonkw_single.mojo.test/test.log
+//mojo/stdlib/test/collections/string/compile_fail:getitem_nonkw_slice.mojo.test FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/compile_fail/getitem_nonkw_slice.mojo.test/test.log
+//mojo/stdlib/test/collections/string/compile_fail:interior_origin_invalidation.mojo.test FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/compile_fail/interior_origin_invalidation.mojo.test/test.log
+//mojo/stdlib/test/collections/string/compile_fail:interior_origin_split_invalidation.mojo.test FAILED in 0.1s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/compile_fail/interior_origin_split_invalidation.mojo.test/test.log
+//mojo/stdlib/test/collections/string/compile_fail:interior_origin_strip_invalidation.mojo.test FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/compile_fail/interior_origin_strip_invalidation.mojo.test/test.log
+//mojo/stdlib/test/collections/string/compile_fail:lit_tests.validate_lit_features FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/collections/string/compile_fail/lit_tests.validate_lit_features/test.log
+//mojo/stdlib/test/ffi/compile_fail:test_external_call_num_fixed_args.mojo.test FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/ffi/compile_fail/test_external_call_num_fixed_args.mojo.test/test.log
+//mojo/stdlib/test/hashlib:test_ahash.mojo.test                          FAILED in 0.5s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/hashlib/test_ahash.mojo.test/test.log
+//mojo/stdlib/test/io:test_file_descriptor.mojo.test                     FAILED in 1.8s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/io/test_file_descriptor.mojo.test/test.log
+//mojo/stdlib/test/memory/pointer/compile_fail:address_space_unknown_name.mojo.test FAILED in 0.7s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/memory/pointer/compile_fail/address_space_unknown_name.mojo.test/test.log
+//mojo/stdlib/test/memory/pointer/compile_fail:comparison_address_space.mojo.test FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/memory/pointer/compile_fail/comparison_address_space.mojo.test/test.log
+//mojo/stdlib/test/memory/pointer/compile_fail:lit_tests.validate_lit_features FAILED in 0.3s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/memory/pointer/compile_fail/lit_tests.validate_lit_features/test.log
+//mojo/stdlib/test/memory/pointer/compile_fail:unsafe_from_address_0.mojo.test FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/memory/pointer/compile_fail/unsafe_from_address_0.mojo.test/test.log
+//mojo/stdlib/test/memory/pointer/compile_fail:unsafe_from_address_neg.mojo.test FAILED in 0.3s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/memory/pointer/compile_fail/unsafe_from_address_neg.mojo.test/test.log
+//mojo/stdlib/test/memory/pointer/compile_fail:write_requires_trivially_deinitable.mojo.test FAILED in 0.4s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/memory/pointer/compile_fail/write_requires_trivially_deinitable.mojo.test/test.log
+//mojo/stdlib/test/memory/test_fail:alloc_zst_fail_tests.mojo.test       FAILED in 33.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/memory/test_fail/alloc_zst_fail_tests.mojo.test/test.log
+//mojo/stdlib/test/memory/test_fail:layout_invalid_alignment_abort.mojo.test FAILED in 28.9s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/memory/test_fail/layout_invalid_alignment_abort.mojo.test/test.log
+//mojo/stdlib/test/os:echo_support/echo.c.tidy                           FAILED in 0.1s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/echo_support/echo.c.tidy/test.log
+//mojo/stdlib/test/os:path/test_basename.mojo.test                       FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/path/test_basename.mojo.test/test.log
+//mojo/stdlib/test/os:path/test_expanduser.mojo.test                     FAILED in 0.3s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/path/test_expanduser.mojo.test/test.log
+//mojo/stdlib/test/os:path/test_islink.mojo.test                         FAILED in 22.5s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/path/test_islink.mojo.test/test.log
+//mojo/stdlib/test/os:path/test_realpath.mojo.test                       FAILED in 0.1s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/path/test_realpath.mojo.test/test.log
+//mojo/stdlib/test/os:path/test_split.mojo.test                          FAILED in 0.6s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/path/test_split.mojo.test/test.log
+//mojo/stdlib/test/os:printenv_support/printenv.c.tidy                   FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/printenv_support/printenv.c.tidy/test.log
+//mojo/stdlib/test/os:sleep_support/sleep.c.tidy                         FAILED in 0.1s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/sleep_support/sleep.c.tidy/test.log
+//mojo/stdlib/test/os:test_chdir.mojo.test                               FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/test_chdir.mojo.test/test.log
+//mojo/stdlib/test/os:test_isatty.mojo.test                              FAILED in 0.3s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/test_isatty.mojo.test/test.log
+//mojo/stdlib/test/os:test_mkdir_and_rmdir.mojo.test                     FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/test_mkdir_and_rmdir.mojo.test/test.log
+//mojo/stdlib/test/os:test_no_trap.mojo.test                             FAILED in 27.4s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/test_no_trap.mojo.test/test.log
+//mojo/stdlib/test/os:test_trap.mojo.test                                FAILED in 0.5s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/os/test_trap.mojo.test/test.log
+//mojo/stdlib/test/pathlib:test_pathlib.mojo.test                        FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/pathlib/test_pathlib.mojo.test/test.log
+//mojo/stdlib/test/subprocess:test_run.mojo.test                         FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/subprocess/test_run.mojo.test/test.log
+//mojo/stdlib/test/sys:test_c_types.mojo.test                            FAILED in 0.1s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/sys/test_c_types.mojo.test/test.log
+//mojo/stdlib/test/sys:test_compile_sanitize_address.mojo.test           FAILED in 28.4s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/sys/test_compile_sanitize_address.mojo.test/test.log
+//mojo/stdlib/test/sys:test_dlhandle.mojo.test                           FAILED in 0.2s
+  C:/users/alban/_bazel_alban/rme75s5o/execroot/_main/bazel-out/arm64_windows-opt/testlogs/mojo/stdlib/test/sys/test_dlhandle.mojo.test/test.log
+
+Executed 52 out of 369 tests: 258 tests pass, 4 fail to build, 52 fail locally, and 55 were skipped.
+There were tests whose specified size is too big. Use the --test_verbose_timeout_warnings command line option to see which ones these are.
