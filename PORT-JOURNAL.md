@@ -1719,3 +1719,145 @@ seconds -- 77,166 frames, 60.002 fps against a refresh-rate-derived present
 interval, the rate read from DEVMODEW by winkb field offset without declaring
 the 272-byte struct -- through twenty-one minutes of live message traffic,
 and exited cleanly through WM_CLOSE -> WM_DESTROY -> PostQuitMessage.
+
+## A Windows library, because upstream has no reason to have one
+
+Upstream Mojo does not support Windows, so it does not ship a Windows
+library either: `os` and `pathlib` are written against POSIX, and the parts
+that cannot be emulated are simply absent. The CompilerRT shim covers the
+POSIX names a Mojo program calls. This is the other half — the things a
+Windows program actually wants, in `std/windows/`.
+
+It is layered, and the bottom layer is the reason it works at all.
+
+**Wide strings, three times hand-rolled.** Every W entry point takes UTF-16
+and every Mojo string is UTF-8, so each of `d3dwindow`, `d3djulia` and
+`comptr` had grown its own `wide()`. `WideString` is that conversion done
+once, through `MultiByteToWideChar` rather than open-coded per code point,
+which is what makes surrogate pairs come out right: `🐉 dragon` measures 9
+UTF-16 units, not 8. `MB_ERR_INVALID_CHARS` is set, so malformed input
+raises instead of quietly becoming replacement characters.
+
+**Errors, decoded.** Windows reports failure three incompatible ways —
+LSTATUS straight from the call, BOOL plus `GetLastError`, and HRESULT — and
+this is the whole surface for all three: `raise_last_error("CreateFileW")`,
+`raise_if_failed(hr, "...")`, and a `_check` inside the registry module.
+All of them run the code through `FormatMessageW`, so a failure reads *"The
+system cannot find the file specified. (2)"* and not *"error 2"*. Windows
+has the words; there is no reason to make the reader look them up.
+
+**Handles that close.** `Handle` and `RegKey` are move-only for the same
+reason `ComPtr` is: duplicating a handle is `DuplicateHandle`, not a copy,
+so a copyable wrapper would double-close. `RegKey.__deinit__` skips
+predefined roots, which are negative, and `list_directory` closes its search
+with `FindClose` rather than `CloseHandle` — a find handle is its own kind,
+and the mismatch is the sort that only shows up under handle-leak testing.
+
+On top: the registry (open/create, typed reads and writes, subkey and value
+enumeration), shell known folders, filesystem paths and listings, system
+information, and the two console calls that decide whether a Windows program
+looks broken.
+
+### What the machine said
+
+`examples/win32/windows_tour.mojo` is the acceptance test, and it prints
+what the machine actually answered rather than asserting:
+
+```
+windows       10.0.26200
+cpu name      Snapdragon(R) X - X126100 - Qualcomm(R) Oryon(TM) CPU
+physical      14 GiB free of 31 GiB
+desktop       C:\Users\alban\OneDrive\Desktop
+product       Windows 10 Home
+```
+
+Two of those lines are the argument for the module existing.
+
+`desktop` resolves through OneDrive. Any program that had built that path
+from `%USERPROFILE%\Desktop` — the obvious thing, and what a POSIX-shaped
+port would do — would have been wrong on this machine, and on every
+OneDrive-backed or domain-joined machine. `SHGetKnownFolderPath` is not a
+convenience over the environment variable; it is the only correct answer.
+
+`product` says *Windows 10 Home* on a Windows 11 machine. `ProductName` in
+the registry has lied since Windows 11 shipped, which is exactly why
+`windows_version()` goes to `RtlGetVersion` in ntdll and reports the build
+number: 26200 is 25H2 and 26100 is 24H2, and the marketing name is not
+load-bearing. `GetVersionExW` would have lied differently — it reports 6.2
+to any process without a compatibility manifest.
+
+Two more of the same shape, coded but less visible: `processor_count()` uses
+`GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)` because `GetSystemInfo`'s
+count stops at the calling process's own processor group and caps at 64; and
+`uptime_ms()` is `GetTickCount64`, because the 32-bit one wraps after 49.7
+days and the bug surfaces seven weeks after anyone could reproduce it.
+
+### Offsets from the database, not from a header
+
+Every struct this touches — `MEMORYSTATUSEX`, `WIN32_FIND_DATAW`,
+`OSVERSIONINFOW`, `CONSOLE_SCREEN_BUFFER_INFO` — gets its size and field
+offsets from winkb at compile time. That is not tidiness. `WIN32_FIND_DATAW`
+is 592 bytes with `cFileName` at 44 on 64-bit, and the numbers in most
+sample code are the 32-bit ones. A wrong offset here does not fail; it reads
+a filename out of the middle of a timestamp.
+
+The predefined registry roots are the same trap in constant form.
+`HKEY_LOCAL_MACHINE` is `(HKEY)(ULONG_PTR)((LONG)0x80000002)` — a *signed*
+32-bit value widened to a pointer, so on 64-bit it is `0xFFFFFFFF80000002`.
+Writing the unsigned constant gives an invalid handle. winkb stores them
+signed, and the module was written from what winkb said.
+
+**A gap found in winkb.** The `constants` table has 5,837 rows of
+`value_kind = 'guid'` — every `FOLDERID_*`, every `CLSID_*` — and stores
+their *names* without their bytes: `value_text` is NULL for all of them. So
+`KnownFolder`'s ids are transcribed from `shlobj.h` after all, in the same
+textual form the COM code uses for IIDs so that one parser serves both, and
+each one is exercised by the tour. Worth fixing at the knowledge-base end;
+the interface IIDs, which come from `types.iid`, are complete.
+
+### Getting an example to build at all
+
+Four environment facts have to be right at once and each fails differently;
+`examples/win32/build.sh` now sets all four, with the failure mode named in
+a comment beside each. The table is in DIALECT-NOTES. Two are worth
+repeating here:
+
+**Git Bash's coreutils ships `/usr/bin/link.exe`**, which wins
+`findProgramByName("link.exe")` and then rejects MSVC's flags with
+*"link: unknown option -- X"*. The MSVC ARM64 linker has to precede it on
+PATH.
+
+**A silent `0xC0000135` before `main`.** The built .exe imports
+`KGENCompilerRTShared.dll`, which in turn imports `AsyncRTRuntimeGlobals.dll`
+and `MSupportGlobals.dll`. PE has no rpath. Miss any of them and the process
+dies with STATUS_DLL_NOT_FOUND and no message at all — from Git Bash it
+surfaces as the actively misleading *"error while loading shared libraries:
+?: cannot open shared object file"*. The build script copies the set beside
+the binary.
+
+Also confirmed while getting there: **`--target-cpu generic` is required for
+AOT builds on this machine.** The default `neoverse-n1` scheduling model is
+incomplete for some load/store-pair instructions the backend emits, and an
+assertions-enabled LLVM aborts at `TargetSchedule.cpp:227` with *"incomplete
+machine model"*. The debug-mode version of this was diagnosed months ago and
+attributed to `mojo run`; it is not JIT-specific, it is the N1 model. And
+Snapdragon X is Oryon, so the N1 proxy was never right to begin with.
+
+### A camera for console programs
+
+`tools/shot.ps1` runs a program in a real console and photographs the
+window, because redirected output is not console output: with stdout on a
+pipe there is no console, so `GetConsoleMode` fails, ANSI colour never turns
+on, and `GetConsoleScreenBufferInfo` has nothing to measure. Under
+redirection the tour reports *"(no console; VT not enabled)"* — correct, and
+also no evidence.
+
+In a real one it reports `92 x 10 cells` for a window opened with
+`mode con: cols=92 lines=10`, and prints *green yellow red* in green, yellow
+and red. Three Windows-specific details had to be got right first: launch
+`conhost.exe` explicitly (left alone, `cmd.exe` opens inside Windows
+Terminal and the launched process's `MainWindowHandle` is zero); declare
+`FindWindowW` with `CharSet.Unicode` (the default ANSI marshalling hands a W
+entry point an ANSI string and finds nothing); and keep the RECT marshalling
+inside the C# helper (through PowerShell's `[ref]` it silently yields zeroes,
+and a 0x0 bitmap is the symptom).

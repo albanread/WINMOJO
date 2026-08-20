@@ -252,3 +252,92 @@ deinit=Release, move=free, `adopt=` for pre-counted out-params, and
 Modules (std.sys._win32): `Win32Module("name.dll")` through the
 process-lifetime cache; `.function[Sig]("Export")` raises on a missing
 export instead of returning a junk callable.
+
+---
+
+## Origins: the mutability half
+
+`unsafe_origin_cast[Target]` changes *which* origin, never *whether* it is
+mutable — its parameter is declared `Origin[mut=Self.mut]`, so asking for
+`MutAnyOrigin` from an immutable pointer is:
+
+> *invalid call to 'unsafe_origin_cast': value passed to 'target_origin'
+> cannot be converted from 'ImmOrigin' to 'Origin[mut=mut]'*
+
+The mutability cast is a separate call, and it comes first:
+
+```mojo
+p.unsafe_mut_cast[True]().unsafe_origin_cast[MutAnyOrigin]()   # launder
+p.as_imm().unsafe_origin_cast[ImmutAnyOrigin]()                # narrow
+```
+
+Two consequences worth designing around rather than casting past:
+
+- A pointer from an **unbound-mutability** source (`text.as_bytes()` on a
+  `StringSlice` whose origin is parametric) has a *parametric* `mut`, and
+  neither `Mut...` nor `Immut...` matches it. `.as_imm()` first pins it.
+- A method that hands Win32 a buffer should take **`mut self`**, not `self`.
+  `self._units.unsafe_ptr()` under an immutable `self` yields an immutable
+  pointer, and the cast that "fixes" it is a lie about what the callee does.
+
+Aliases live in `std.origin`: `MutAnyOrigin`, `ImmutAnyOrigin`,
+`MutUnsafeAnyOrigin`, `ImmUnsafeAnyOrigin`.
+
+---
+
+## More removals found the hard way
+
+| Written as | Diagnostic | Now |
+|---|---|---|
+| `List[T](a, b, c)` | *candidate not viable: missing required argument: `__list_literal__`* | `var xs: List[T] = [a, b, c]` |
+| `len(some_string)` | *`len(String/StringSlice)` is not supported because Mojo strings are UTF-8 encoded* | `.byte_length()`, `len(s.codepoints())`, `len(s.graphemes())` |
+| `s.ljust(n)` / `sep.join(xs)` | *'String' value has no attribute 'ljust'* | write the loop |
+| `InlineArray[T, N]` | *use of unknown declaration 'InlineArray'* | `List[T]`, or a `StaticString` where the value is a literal |
+| `struct X(Stringable)` | *use of unknown declaration 'Stringable'* | `Writable` alone; `print(x)` goes through it |
+| `def write_to[W: Writer](self, mut writer: W)` | *no matching function in call to 'write'* | `def write_to(self, mut writer: Some[Writer])` |
+| `from x import y` inside a function | *'import' statements must be at module or function scope* | module scope (function scope means the top of the function, not a nested block) |
+
+Two more that only appear at a use site far from the declaration:
+
+- **`Copyable, Movable` synthesises `__init__(out self, *, copy:)` and
+  `(*, deinit move:)`** for a struct with no `__deinit__`. Writing them
+  yourself is *"redefinition of function '__init__' with identical
+  signature"*. A struct that *does* own something (and so has a
+  `__deinit__`) must still write them.
+- **A `comptime` constant of a struct type cannot be used as a runtime value**
+  unless the struct is `ImplicitlyCopyable`: *"cannot materialize comptime
+  value of type 'X' to runtime because it is not 'ImplicitlyCopyable'"*.
+  Types whose constants are meant to be passed around — enum-like ids — want
+  `ImplicitlyCopyable, Movable`, not `Copyable, Movable`.
+- **`Tuple[A, B]` cannot be indexed if an element is not implicitly
+  copyable**: `pair[1]` on a `Tuple[UInt32, List[UInt8]]` is *"value of type
+  'List[UInt8]' cannot be implicitly copied"*, and `^` does not help because
+  the subscript copies before the transfer. Return the owned value and report
+  the small one through a `mut` argument instead.
+
+---
+
+## Building an example outside Bazel
+
+`examples/win32/build.sh` exists because four environment facts have to be
+right at once, and each fails differently:
+
+| Missing | Symptom |
+|---|---|
+| `MODULAR_MOJO_MAX_IMPORT_PATH` | the freshly-built stdlib is invisible |
+| `MODULAR_MOJO_MAX_COMPILERRT_PATH` | *unable to locate Mojo CompilerRT library* |
+| `MODULAR_MOJO_MAX_WINKB_PATH` | *cannot open the Win32 metadata database at '/lib/windows_api.db'* |
+| MSVC's `link.exe` ahead of `/usr/bin` | *link: unknown option -- X* (Git Bash's coreutils `link.exe` wins `findProgramByName`) |
+| sysroot dirs on `LIB` | *LNK1181: cannot open input file 'msvcrt.lib'* |
+
+And two that bite after a successful link:
+
+- **`--target-cpu generic`.** The default `neoverse-n1` scheduling model is
+  incomplete for some load/store-pair instructions the backend emits, and an
+  assertions-enabled LLVM aborts with *"DefIdx 1 exceeds machine model writes
+  ... incomplete machine model"* at `TargetSchedule.cpp:227`. Snapdragon X is
+  Oryon, so the N1 proxy was never right anyway.
+- **The runtime DLLs must sit beside the .exe.** PE has no rpath, so
+  `KGENCompilerRTShared.dll` and the `*Globals.dll` it imports are found next
+  to the binary or not at all — and "not at all" is a silent `0xC0000135`
+  before `main`, with no message of any kind.
