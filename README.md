@@ -1,5 +1,30 @@
 # WINMOJO — Mojo 1.1 on native Windows ARM64
 
+## Thanks, and a statement of intent
+
+Mojo is a serious piece of language engineering, and it was given away. Thanks
+are owed to Chris Lattner and the team at Modular who designed and built it, and
+to everyone who has contributed to the compiler and the standard library since.
+
+Open-sourcing the compiler and stdlib under Apache 2.0 — with a patent grant and
+no field-of-use restriction — is what makes a port like this one both legal and
+possible. It means someone can take the source, aim it at hardware the authors
+never targeted, and find out what happens. That is not the industry norm, and it
+is the reason this repository can exist at all.
+
+What follows is not written in a spirit of celebration, and it would be dishonest
+to pretend otherwise.
+
+This repository exists to run Mojo on my own hardware, to understand how it
+works, and to find out whether it is useful to me. It is not a tribute and not an
+advertisement. Much of what is recorded here — in this README and at far greater
+length in the [journal](PORT-JOURNAL.md) — is blunt about the language, the
+toolchain, and the licensing, and it will stay blunt wherever the evidence points
+that way. That is the point of the exercise rather than a failure of manners:
+**I am interested; I am not a fan.**
+
+## What this is
+
 **An unofficial, unsupported fork of [modular/modular](https://github.com/modular/modular)
 that ports the Mojo compiler and standard library to native Windows 11 on
 Snapdragon (ARM64) PCs.**
