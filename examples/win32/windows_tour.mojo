@@ -23,6 +23,7 @@ from std.windows import (
     console_size,
     current_directory,
     current_process_id,
+    delete_file,
     disk_free_space,
     enable_virtual_terminal,
     environment,
@@ -39,6 +40,7 @@ from std.windows import (
     performance_frequency,
     processor_count,
     quote_argument,
+    read_file,
     run_captured,
     set_clipboard_text,
     system_time_ns,
@@ -48,6 +50,7 @@ from std.windows import (
     use_utf8_console,
     user_name,
     windows_version,
+    write_file,
 )
 
 
@@ -254,6 +257,24 @@ def main() raises:
     )
     print("child exit   ", probe[0])
     print("child said   ", probe[1].strip())
+
+    rule("files")
+    # Binary-exact round trip: every byte value, including the 0x0A that a
+    # text-mode writer would corrupt into 0x0D 0x0A.
+    var payload = List[UInt8](length=256, fill=0)
+    for i in range(256):
+        payload[i] = UInt8(i)
+    var scratch_file = temp_path() + "mojo_tour_bytes.bin"
+    write_file(scratch_file, Span(payload))
+    var returned = read_file(scratch_file)
+    var intact = len(returned) == 256
+    if intact:
+        for i in range(256):
+            if returned[i] != UInt8(i):
+                intact = False
+    print("round trip   ", "256 bytes", "intact" if intact else "CORRUPTED")
+    delete_file(scratch_file)
+    print("cleaned up   ", scratch_file)
 
     rule("clipboard")
     var before = get_clipboard_text()

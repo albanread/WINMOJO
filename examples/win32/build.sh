@@ -36,10 +36,18 @@ example="${1:?usage: build.sh <example-name> [mojo build args...]}"
 shift || true
 
 # bazel-bin is a junction into the output base; walking up from its real path
-# finds the external repo forest without hardcoding a user name.
-external="$(cd "$repo" && cd "$(readlink -f bazel-bin)/../../../external" && pwd)"
+# finds the repositories without hardcoding a user name.
+#
+# Two `external` directories exist and they are not interchangeable. The one
+# under execroot is a symlink FOREST containing only what the most recent
+# build needed -- winkb vanishes from it the moment a build does not use it.
+# The one directly under the output base is the real store. Prefer that.
+bin_real="$(cd "$repo" && readlink -f bazel-bin)"
+output_base="$(cd "$bin_real/../../../../.." && pwd)"
+external="$output_base/external"
 clang_bin="$external/+http_archive+clang-windows-arm64/bin"
 sysroot="$external/+windows_sysroot_repository+sysroot-windows-arm64"
+winkb="$external/+new_local_repository+winkb/windows_api.db"
 
 msvc_link="$(ls -d "/c/Program Files/Microsoft Visual Studio"/*/*/VC/Tools/MSVC/*/bin/Hostarm64/arm64 2>/dev/null | sort | tail -1 || true)"
 if [[ -z "$msvc_link" ]]; then
@@ -57,7 +65,7 @@ export MODULAR_MOJO_MAX_COMPILERRT_PATH="$repo/bazel-bin/KGEN/KGENCompilerRTShar
 # The Windows knowledge base. Under Bazel this arrives as a toolchain input;
 # a standalone build has to be told where it is, and anything using
 # winkb_struct_size or winkb_field_offset fails to elaborate without it.
-export MODULAR_MOJO_MAX_WINKB_PATH="$sysroot/../+new_local_repository+winkb/windows_api.db"
+export MODULAR_MOJO_MAX_WINKB_PATH="$winkb"
 
 # -I for anything beyond std. MODULAR_MOJO_MAX_IMPORT_PATH names one place;
 # the `max` package (GPU work) is a separate build output, so it comes in on

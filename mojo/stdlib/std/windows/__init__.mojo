@@ -70,9 +70,11 @@ from .fs import (
     module_path,
     move_file,
     path_exists,
+    read_file,
     remove_directory,
     set_current_directory,
     temp_path,
+    write_file,
 )
 from .process import (
     build_command_line,

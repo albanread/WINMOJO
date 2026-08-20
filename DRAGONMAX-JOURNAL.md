@@ -1408,3 +1408,57 @@ correctness. When overlap matters, the right fix is events, not CL_FALSE.
   under Bazel.
 - Two trace switches stay: `DRAGONRT_TRACE_ARGS`, `DRAGONRT_TRACE_COPY`.
   Both are one `getenv` on a cold path.
+
+---
+
+## 2026-08-20 — Mandelbrot: the first Mojo program worth watching on the Adreno
+
+`examples/win32/adreno_mandelbrot.mojo`. A window opens and zooms into
+seahorse valley; every pixel of every frame is computed by a Mojo kernel
+compiled to SPIR-V and executed on the Adreno. Direct3D is reduced to a
+texture upload and a fullscreen triangle, and the only HLSL left is the
+colour ramp. The Julia demo's "cheating with a shader" era is closed the
+right way round: the GPU language is Mojo now.
+
+Numbers, 960x720 at 512 max iterations (73M iterations/frame mean):
+
+| | per frame |
+|---|---|
+| Adreno X1-45, Mojo kernel via OpenCLOn12, incl. readback | **11-13 ms** |
+| Oryon, one core, identical scalar Mojo | 250 ms |
+
+~20x against a single scalar core, sustained while animating — and this
+kernel is the shape saxpy never tested: a data-dependent `while` whose trip
+count varies 1..512 per work-item, wavefront divergence, structured control
+flow. One writing lesson: SPIR-V wants ONE loop exit; the kernel keeps the
+escape test in the loop condition rather than `break`ing from the body.
+
+### What "the same answer" means for a chaotic function
+
+The demo verifies GPU against CPU before opening the window, and demanding
+bit-exactness would have been wrong. Of 691,200 pixels, 1,713 differ — every
+one either high-count (near the set, where a one-ulp FMA difference
+amplifies every iteration; the CPU holds a filament pixel to 512 while the
+GPU honestly escapes it at 450) or a ±1 flip at the escape radius. The
+check therefore demands exactness only where chaos cannot excuse anything:
+pixels with low CPU count (<256), locally flat neighbourhood, delta > 1.
+**Zero of those** — and a real codegen bug would light that region up,
+because wrong arithmetic is wrong everywhere, including the far field.
+
+First cut of the check was stricter (any smooth-neighbourhood mismatch) and
+aborted the program on 4 filament pixels before the window opened — worth
+recording because "the window closed straight away" was the entire symptom,
+and the cause was a too-honest assertion three layers below.
+
+### Two loose ends found and fixed on the way
+
+- **build.sh resolved `external` through the execroot**, which is a symlink
+  forest containing only what the last build touched — winkb vanished from
+  it the moment a build didn't use the DB. Now resolved via the output base,
+  where the real store lives.
+- **`std.windows` gained `read_file`/`write_file`** (CreateFileW/ReadFile/
+  WriteFile, byte-exact, short-read/short-write loops) — written for the
+  console version of this demo, kept because the stdlib had no way to write
+  a binary file: Mojo's `open()` rejects `"wb"`, and a text-mode writer
+  would turn every 0x0A into 0x0D 0x0A. The tour now round-trips all 256
+  byte values through the temp directory.

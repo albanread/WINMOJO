@@ -528,3 +528,156 @@ def disk_free_space(path: StringSlice) raises -> Tuple[Int, Int]:
     ):
         raise_last_error("GetDiskFreeSpaceExW(" + String(path) + ")")
     return (Int(free_to_caller), Int(total))
+
+
+def read_file(path: StringSlice) raises -> List[UInt8]:
+    """Reads a whole file as bytes.
+
+    Bytes, exactly as stored: `CreateFileW` has no text mode, so nothing
+    translates line endings on the way in or out. That matters for anything
+    that is not text -- an image written through a translating writer has
+    every 0x0A turned into 0x0D 0x0A and is silently corrupt.
+
+    Args:
+        path: The file to read.
+
+    Returns:
+        The file's contents.
+
+    Raises:
+        If the file cannot be opened or read.
+    """
+    var wide = WideString(path)
+    var kernel32 = Win32Module("kernel32.dll")
+
+    var raw = kernel32.function[
+        def (
+            Pointer[UInt16, MutAnyOrigin], UInt32, UInt32, Int, UInt32, UInt32, Int
+        ) thin abi("C") -> Int
+    ]("CreateFileW")(
+        wide.unsafe_ptr(),
+        UInt32(winkb_constant["GENERIC_READ"]() & 0xFFFFFFFF),
+        UInt32(winkb_constant["FILE_SHARE_READ"]()),
+        Int(0),  # default security
+        UInt32(winkb_constant["OPEN_EXISTING"]()),
+        UInt32(winkb_constant["FILE_ATTRIBUTE_NORMAL"]()),
+        Int(0),  # no template
+    )
+    var handle = Handle(adopt=raw)
+    if not handle:
+        raise_last_error("CreateFileW(" + String(path) + ")")
+
+    var size = UInt64(0)
+    if (
+        kernel32.function[
+            def (Int, Pointer[UInt64, MutAnyOrigin]) thin abi("C") -> c_int
+        ]("GetFileSizeEx")(
+            handle.value(), Pointer(to=size).unsafe_origin_cast[MutAnyOrigin]()
+        )
+        == 0
+    ):
+        raise_last_error("GetFileSizeEx(" + String(path) + ")")
+
+    var bytes = List[UInt8](length=Int(size), fill=0)
+    if size == 0:
+        return bytes^
+
+    var read = kernel32.function[
+        def (
+            Int, Pointer[UInt8, MutAnyOrigin], UInt32, Pointer[UInt32, MutAnyOrigin], Int
+        ) thin abi("C") -> c_int
+    ]("ReadFile")
+
+    # ReadFile is not obliged to return everything at once, so loop until the
+    # file is exhausted rather than trusting one call.
+    var done = 0
+    while done < Int(size):
+        var got = UInt32(0)
+        if (
+            read(
+                handle.value(),
+                bytes.unsafe_ptr()
+                .unsafe_offset(done)
+                .unsafe_origin_cast[MutAnyOrigin](),
+                UInt32(Int(size) - done),
+                Pointer(to=got).unsafe_origin_cast[MutAnyOrigin](),
+                Int(0),
+            )
+            == 0
+        ):
+            raise_last_error("ReadFile(" + String(path) + ")")
+        if got == 0:
+            break
+        done += Int(got)
+    return bytes^
+
+
+def write_file(path: StringSlice, data: Span[UInt8, _]) raises:
+    """Writes bytes to a file, replacing anything already there.
+
+    Bytes, exactly as given -- see `read_file` for why that is worth saying.
+
+    Args:
+        path: The file to write.
+        data: The bytes to write.
+
+    Raises:
+        If the file cannot be created or written.
+
+    Example:
+
+    ```mojo
+    from std.windows import write_file
+
+    def main() raises:
+        var bytes = List[UInt8](length=4, fill=65)
+        write_file("aaaa.txt", Span(bytes))
+    ```
+    """
+    var wide = WideString(path)
+    var kernel32 = Win32Module("kernel32.dll")
+
+    var raw = kernel32.function[
+        def (
+            Pointer[UInt16, MutAnyOrigin], UInt32, UInt32, Int, UInt32, UInt32, Int
+        ) thin abi("C") -> Int
+    ]("CreateFileW")(
+        wide.unsafe_ptr(),
+        UInt32(winkb_constant["GENERIC_WRITE"]() & 0xFFFFFFFF),
+        UInt32(0),  # exclusive while we write
+        Int(0),
+        UInt32(winkb_constant["CREATE_ALWAYS"]()),
+        UInt32(winkb_constant["FILE_ATTRIBUTE_NORMAL"]()),
+        Int(0),
+    )
+    var handle = Handle(adopt=raw)
+    if not handle:
+        raise_last_error("CreateFileW(" + String(path) + ")")
+
+    var write = kernel32.function[
+        def (
+            Int, Pointer[UInt8, MutAnyOrigin], UInt32, Pointer[UInt32, MutAnyOrigin], Int
+        ) thin abi("C") -> c_int
+    ]("WriteFile")
+
+    # Same reasoning as the read loop: a short write is legal.
+    var done = 0
+    while done < len(data):
+        var put = UInt32(0)
+        if (
+            write(
+                handle.value(),
+                data.unsafe_ptr()
+                .unsafe_offset(done)
+                .unsafe_mut_cast[True]()
+                .unsafe_origin_cast[MutAnyOrigin](),
+                UInt32(len(data) - done),
+                Pointer(to=put).unsafe_origin_cast[MutAnyOrigin](),
+                Int(0),
+            )
+            == 0
+        ):
+            raise_last_error("WriteFile(" + String(path) + ")")
+        if put == 0:
+            raise Error("WriteFile(" + String(path) + ") wrote nothing")
+        done += Int(put)
