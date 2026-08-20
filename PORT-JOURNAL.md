@@ -1366,3 +1366,102 @@ casually. `lit.common.configured.in` resolves FileCheck through
 materializes dependency DLLs beside each test binary — the OS loader cannot
 read a manifest. Without both, the zip strategy is the only one that works,
 and the disk cost comes straight back.
+
+---
+
+## Nine names the standard library could not find
+
+The stdlib reaches libc by name. `external_call["symlink"]` is a C symbol that
+must exist at link time, and if it does not the whole binary fails to link
+rather than the one call failing. Nine were missing, and finding out which
+turned out to matter more than fixing them.
+
+Measured against the sysroot rather than assumed, they fell into three groups.
+`oldnames.lib` already aliases the legacy set — `open`, `read`, `write`, `dup`,
+`stat`, `chdir` and about ninety more — to their underscore-prefixed CRT
+spellings, which is why linking it earlier resolved `write` and `dup` for free.
+`popen`, `pclose` and `pipe` exist under different names or shapes. Only six
+were genuinely absent.
+
+That measurement is the whole reason this is a small file rather than a
+dependency. [libunistd](https://github.com/robinrowe/libunistd) is MIT and
+would have done the job; GNU's ports are GPL and could not. But six functions
+is less code than the licence notice and the provenance question a third party
+would have added, and the licensing article in the README depends on this tree
+having no third-party entanglements.
+
+### Where Windows cannot keep the promise
+
+The interesting part is not the mapping, it is the places where there is no
+mapping and the shim has to choose. Written up in full in
+[docs/win32_posix_shim.md](docs/win32_posix_shim.md); the ones that would bite
+hardest:
+
+`symlink` and `link` take their arguments in the **opposite order** from the
+Win32 calls that implement them. Get it wrong and you still get a link, just
+pointing the wrong way — a test that checks a link exists will pass. The
+stdlib's own `test_link.mojo` catches it properly: it reads through the link
+and asserts the content, then asserts `st_ino` matches and `st_nlink == 2`.
+
+`fchdir` is not atomic, because Windows has no directory-handle form of
+`SetCurrentDirectory` — the handle is resolved to a path and the path entered.
+`kill` cannot signal, so every signal but 0 terminates. And a killed process is
+deliberately reported as *exited* rather than signalled, because
+`Process.wait()` raises on a status that has not exited, which would turn a
+successful kill into an exception.
+
+`symlink` also depends on Developer Mode, since it passes
+`SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE`. That machine setting is now
+load-bearing twice over — once for Bazel's runfiles and once for the standard
+library.
+
+### Process spawning, and four gates behind one gate
+
+`os.Process` was refused at compile time — *"Unknown platform process execution
+not implemented"* — so nothing that spawned a child could even be built. Behind
+that gate were four more, each visible only once the previous one was closed:
+`_get_environ`, `FileDescriptor.read_bytes`, then `pipe`, then the launcher.
+There is a particular flavour of porting where progress is measured in
+discovering the next thing that was never going to work.
+
+`posix_spawnp` maps onto `CreateProcessW` well. `SearchPathW` supplies the "p",
+and passing the resolved path as the application name keeps `argv[0]` as the
+caller wrote it, which Windows otherwise overwrites with the program path.
+
+Two details are worth remembering because both fail silently. **Command-line
+quoting** is the inverse of the MSVCRT parsing rule, in which a backslash
+escapes only before a quote — so runs of backslashes double in that position
+and nowhere else, and the naive wrap-in-quotes corrupts any argument ending in
+a path separator, which on Windows is most of them. **A pid is reused** once
+its process is gone, so waiting by reopening the pid races; the handle from
+`CreateProcessW` is kept in a table keyed by the pid we report.
+
+`_get_environ` deserves its own note. Windows keeps two environments — the
+CRT's `_environ` and the Win32 block `CreateProcessW` actually copies — and
+they can disagree. Marshalling one into the other would have been a way to
+introduce a bug rather than fix one. Returning null means "inherit", which is
+precisely what the only caller wants, so the null is the accurate answer and
+not a stub.
+
+`read_bytes` needed the opposite kind of care: the CRT's `_read` returns `int`,
+not `ssize_t`, so reading its `-1` as a 64-bit value gives 4294967295 and the
+failure check never fires. The caller would take a bogus length for a good
+read.
+
+### Verified against programs that exist
+
+The stdlib's `test_process.mojo` spawns `echo`, `sleep` and `printenv`. None of
+those is an executable on Windows — `echo` is a `cmd` builtin — so that test
+cannot pass here whatever the shim does, and it is a test-content problem
+rather than a port one. The shim was verified against real Windows programs
+instead: PATH resolution through `where`, an exit code of 7 round-tripping
+through the musl status encoding, argument quoting, failure on a missing
+executable, and `kill`.
+
+`test_process` now compiles and links, and fails in the Bazel test launcher,
+which reports `Rlocation failed on C:Program FilesGitusrbinbash.exe` — the
+backslashes stripped from the path. That is the same harness fault that takes
+out `test_quick_bench`, it is unrelated to any of this, and it is the next
+thing in the way.
+
+Across os, subprocess and bit these changes took failures from twelve to one.
