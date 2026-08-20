@@ -65,6 +65,10 @@ two dead constructs.
 
 ## What this means for the port
 
+The positive counterpart to this list -- how to write what this compiler
+*accepts*, keyed by the error you are looking at -- is
+[DIALECT-NOTES.md](DIALECT-NOTES.md).
+
 - **Treat any Mojo example older than this commit as pseudocode.** Read it for
   intent, not syntax.
 - **The standard library in this tree is the reference.** It is the largest body

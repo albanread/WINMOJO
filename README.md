@@ -214,7 +214,8 @@ about Mojo describes a Python-style `def` coexisting with a systems-style `fn`;
 that is no longer true at this version, which rejects `fn` with *"'fn' has been
 removed; use 'def' instead"*. It is not an isolated case — see
 [language drift](docs/LANGUAGE-DRIFT.md) for the full list of constructs the
-documentation still teaches and this compiler refuses. It was built by Modular as the language
+documentation still teaches and this compiler refuses, and
+[dialect notes](docs/DIALECT-NOTES.md) for how to write what it accepts. It was built by Modular as the language
 for writing AI kernels — code that must run on CPUs, GPUs, and accelerators from
 one source — and that origin explains its two defining traits.
 
