@@ -130,9 +130,15 @@ binaries for real models.
 
 ## License
 
-Apache 2.0 with LLVM exceptions, per upstream. MAX usage and distribution
-fall under Modular's [Community License](https://www.modular.com/legal/community),
-also per upstream — this fork adds code but subtracts no obligations. Our
+Apache 2.0 with LLVM exceptions, per the header on every one of the 4,566
+source files — which is the license that matters, and which Modular's own
+[Community License](https://www.modular.com/legal/community) concedes
+"controls over these Terms in the event of any conflict." The Community
+License governs Modular's *binary* distributions, none of which this project
+has ever downloaded, possessed, or run — a fact we maintain on purpose. The
+full close reading, including the version of the license that changed the day
+before we forked and what replaced it, is in
+[`dragon/design/LICENSE-ANALYSIS.md`](dragon/design/LICENSE-ANALYSIS.md). Our
 additions are as open as we could make them; the only closed thing in the
 chain is the GPU driver, and we have made our peace with that, in the way one
 makes peace with weather.

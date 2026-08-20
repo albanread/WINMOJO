@@ -1015,3 +1015,50 @@ hardening, kernels. Those stay here.
 
 The ladder in `DRAGONMAX.md` now reads: D0–D3 done, W1–W3 done, **HANDOFF
 declared**, GPU GOAL = the acceptance test, blocked only on WINMOJO G3+.
+
+---
+
+## 2026-08-19 — the MAX license, read properly: the trap was real, then it moved
+
+Suspicion raised: the Community License is a commercial-use trap. Verdict from
+reading all three instruments (full analysis with verbatim quotes in
+`dragon/design/LICENSE-ANALYSIS.md`): **confirmed — and the copy in this repo
+is the smoking gun.**
+
+`Licenses/LICENSE` here (from upstream `f66d4d5`) is dated **Aug 17, 2026**
+and contains: a preamble binding anyone "developing software using... [the]
+Mojo programming language"; a non-compete on developing Mojo applications; an
+**8-accelerator cap on commercial use for anything that is not an x86/ARM CPU
+or NVIDIA hardware** — Snapdragon's Adreno and Hexagon are exactly the
+monetised class; and a clause requiring Modular's written permission to run
+distributed apps on hardware MAX does not expressly support.
+
+**One day later — Aug 18 — the website version removed every one of those.**
+Their own FAQ admits it: "The old license capped free production use at eight
+accelerators outside x86, ARM and NVIDIA... Both requirements are now gone."
+Our tree carries the stale, harsher text; the fork happened the day after the
+correction.
+
+The replacement trap is aimed at AI-assisted reimplementation: new §1.3 (no
+using MAX as AI input "to produce software that reimplements or substitutes
+for MAX") and the ToU's "AI-Derived Work" definition, which sweeps in
+"translations, ports, transpilations, refactorings" and asserts clean-room
+separation is no exemption if Modular IP was "input, reference, or
+inspiration". Aimed, in other words, at the genus this project belongs to.
+
+Why it does not reach us, on the facts: those instruments bind on *using their
+SDK binaries or hosted platform*, and this project has never done either — no
+account, no wheel, no prebuilt toolchain (impossible on Windows anyway).
+Everything here descends from per-file Apache-licensed source, whose grant the
+new Community License itself concedes "controls... in the event of any
+conflict". Even the new §1.3 carves out "develop[ing] Your own software that
+runs on or interoperates with MAX".
+
+**Bright-line rule adopted:** no Modular binaries, wheels, or accounts in this
+project or WINMOJO, ever. Costs nothing — everything measured this week was
+done without them — and keeps the entire stack on the Apache grant, where the
+AI clauses do not exist.
+
+Also flagged: trademarks are a separate axis ("maxdragon" leads with their
+mark; cheap to rename if this grows commercial weight), and Qualcomm's QAIRT
+LICENSE.pdf is the document to read before the NPU line ever ships Qnn DLLs.
