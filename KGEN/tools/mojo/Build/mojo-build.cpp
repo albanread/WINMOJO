@@ -825,8 +825,26 @@ static int linkOutput(OutputType outputType, const State &state,
   linkerArgs.emplace_back("msvcrt.lib");
 #endif
 
-  // Mojo only supports X86_64 COFF right now.
-  linkerArgs.emplace_back("/machine:X64");
+  // The standard library's FFI layer calls POSIX names -- write, dup and
+  // friends -- which the MSVC CRT exports with a leading underscore.
+  // oldnames.lib supplies the un-prefixed aliases. cl.exe requests it through
+  // a /DEFAULTLIB directive in its objects, but Mojo emits its own objects and
+  // invokes the linker directly, so nothing asks for it unless we do.
+  linkerArgs.emplace_back("oldnames.lib");
+
+  // Match the COFF machine type to the target architecture. This was
+  // hardcoded to X64 with the note "Mojo only supports X86_64 COFF right now",
+  // which makes every AOT link on Windows ARM64 fail in the linker rather than
+  // in the compiler. The target triple is already parsed a few lines below for
+  // the libm decision, so the arch is available here.
+  if (llvm::Triple triple(options.targetTriple); triple.isAArch64()) {
+    linkerArgs.emplace_back("/machine:ARM64");
+  } else if (triple.getArch() == llvm::Triple::x86_64) {
+    linkerArgs.emplace_back("/machine:X64");
+  } else {
+    return state.reportError(llvm::formatv(
+        "unsupported COFF target architecture '{0}'", triple.getArchName()));
+  }
 #else
   linkerArgs.emplace_back("-o");
   linkerArgs.emplace_back(outputName);
