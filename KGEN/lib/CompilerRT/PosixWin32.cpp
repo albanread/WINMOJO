@@ -27,12 +27,16 @@
 #include <windows.h>
 
 #include <errno.h>
+#include <fcntl.h>
 #include <io.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 
+#include <mutex>
 #include <string>
+#include <vector>
 
 // Linux's PATH_MAX. The standard library sizes its realpath destination buffer
 // against this value, so we must not write more than this into a caller buffer
@@ -404,6 +408,274 @@ COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT FILE *popen(const char *command,
 
 COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT int pclose(FILE *stream) {
   return ::_pclose(stream);
+}
+
+/// POSIX pipe(2). The CRT's `_pipe` is not a rename of this one -- it takes
+/// two extra arguments, so oldnames.lib cannot alias it and it has to be
+/// wrapped. _O_BINARY is required: the default text mode would translate CRLF
+/// in the pipe and corrupt any binary payload passing through it.
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT int pipe(int fds[2]) {
+  return ::_pipe(fds, 4096, _O_BINARY);
+}
+
+//===----------------------------------------------------------------------===//
+// Process creation
+//===----------------------------------------------------------------------===//
+//
+// Windows identifies a running process by HANDLE, but POSIX identifies it by
+// pid, and a pid is reused once the process is gone. Handing callers a raw pid
+// and re-opening it later would therefore race against reuse -- so the handle
+// CreateProcessW returns is kept here, keyed by the pid we report. waitpid and
+// kill look the handle up rather than reopening, and the entry is dropped once
+// the process has been reaped.
+
+namespace {
+
+struct SpawnedChild {
+  DWORD pid;
+  HANDLE handle;
+};
+
+std::mutex &childTableMutex() {
+  static std::mutex m;
+  return m;
+}
+
+std::vector<SpawnedChild> &childTable() {
+  static std::vector<SpawnedChild> t;
+  return t;
+}
+
+void rememberChild(DWORD pid, HANDLE handle) {
+  std::lock_guard<std::mutex> lock(childTableMutex());
+  childTable().push_back({pid, handle});
+}
+
+/// Look up a child's handle. Returns nullptr if we did not spawn it.
+HANDLE handleForChild(DWORD pid) {
+  std::lock_guard<std::mutex> lock(childTableMutex());
+  for (const auto &c : childTable())
+    if (c.pid == pid)
+      return c.handle;
+  return nullptr;
+}
+
+void forgetChild(DWORD pid) {
+  std::lock_guard<std::mutex> lock(childTableMutex());
+  auto &t = childTable();
+  for (size_t i = 0; i < t.size(); ++i) {
+    if (t[i].pid == pid) {
+      ::CloseHandle(t[i].handle);
+      t.erase(t.begin() + static_cast<ptrdiff_t>(i));
+      return;
+    }
+  }
+}
+
+/// Append one argument to a Windows command line, quoted so that the CRT
+/// parser in the child reconstructs exactly this string as one argv entry.
+///
+/// This is the inverse of the documented MSVCRT parsing rule, and the reason
+/// it cannot be a simple "wrap in quotes": a backslash is only an escape
+/// character when it precedes a quote, so a run of backslashes must be
+/// doubled in that position and left alone everywhere else. Getting this wrong
+/// silently corrupts paths ending in a separator.
+void appendQuotedArg(std::wstring &out, const std::wstring &arg) {
+  if (!arg.empty() && arg.find_first_of(L" \t\n\v\"") == std::wstring::npos) {
+    out += arg;
+    return;
+  }
+
+  out += L'"';
+  for (auto it = arg.begin();; ++it) {
+    size_t backslashes = 0;
+    while (it != arg.end() && *it == L'\\') {
+      ++it;
+      ++backslashes;
+    }
+
+    if (it == arg.end()) {
+      // Trailing backslashes precede the closing quote, so they escape.
+      out.append(backslashes * 2, L'\\');
+      break;
+    }
+    if (*it == L'"') {
+      out.append(backslashes * 2 + 1, L'\\');
+      out += *it;
+    } else {
+      out.append(backslashes, L'\\');
+      out += *it;
+    }
+  }
+  out += L'"';
+}
+
+/// Resolve an executable the way execvp/posix_spawnp do: consult PATH unless
+/// the name already contains a separator. Windows also needs the extension
+/// supplied, which SearchPathW appends when the name carries none.
+bool resolveExecutable(const std::wstring &file, std::wstring &out) {
+  wchar_t *filePart = nullptr;
+  DWORD n = ::SearchPathW(/*lpPath=*/nullptr, file.c_str(),
+                          /*lpExtension=*/L".exe", 0, nullptr, &filePart);
+  if (n == 0)
+    return false;
+  out.resize(n);
+  DWORD written = ::SearchPathW(nullptr, file.c_str(), L".exe", n, &out[0],
+                                &filePart);
+  if (written == 0 || written >= n)
+    return false;
+  out.resize(written);
+  return true;
+}
+
+} // namespace
+
+/// POSIX posix_spawnp(3).
+///
+/// The standard library always passes null for `file_actions` and `attrp` --
+/// there is no descriptor redirection or attribute handling to emulate -- so
+/// those are rejected rather than silently ignored if they ever become
+/// non-null, which would otherwise drop redirections on the floor.
+///
+/// Returns an errno value directly (0 on success), as POSIX specifies; it does
+/// not use -1/errno.
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT int
+posix_spawnp(int *pid, const char *file, const void *file_actions,
+             const void *attrp, char *const argv[], char *const envp[]) {
+  if (!pid || !file || !argv)
+    return EINVAL;
+  if (file_actions || attrp)
+    return ENOSYS;
+
+  std::wstring wFile;
+  if (!widen(file, wFile))
+    return EINVAL;
+
+  std::wstring appName;
+  if (!resolveExecutable(wFile, appName)) {
+    // No PATH match. Fall back to the name as given so an explicit or
+    // extensioned path still works, and let CreateProcessW report the error.
+    appName = wFile;
+  }
+
+  // POSIX passes argv separately from the executable, and argv[0] is free to
+  // differ from it. Windows has only a command line, so argv is rendered
+  // whole and the resolved path is passed as the application name -- which is
+  // what keeps argv[0] intact instead of forcing it to be the program path.
+  std::wstring cmdline;
+  for (size_t i = 0; argv[i] != nullptr; ++i) {
+    std::wstring wArg;
+    if (!widen(argv[i], wArg))
+      return EINVAL;
+    if (i)
+      cmdline += L' ';
+    appendQuotedArg(cmdline, wArg);
+  }
+  if (cmdline.empty())
+    appendQuotedArg(cmdline, appName);
+
+  // A null envp means inherit, matching posix_spawn with no attribute set.
+  std::wstring envBlock;
+  bool haveEnv = envp != nullptr;
+  if (haveEnv) {
+    for (size_t i = 0; envp[i] != nullptr; ++i) {
+      std::wstring entry;
+      if (!widen(envp[i], entry))
+        return EINVAL;
+      envBlock += entry;
+      envBlock.push_back(L'\0');
+    }
+    // The block itself is terminated by a second NUL.
+    envBlock.push_back(L'\0');
+  }
+
+  STARTUPINFOW si;
+  ::ZeroMemory(&si, sizeof(si));
+  si.cb = sizeof(si);
+
+  PROCESS_INFORMATION pi;
+  ::ZeroMemory(&pi, sizeof(pi));
+
+  // The command line buffer must be writable: CreateProcessW may modify it.
+  std::vector<wchar_t> mutableCmdline(cmdline.begin(), cmdline.end());
+  mutableCmdline.push_back(L'\0');
+
+  BOOL ok = ::CreateProcessW(
+      appName.c_str(), mutableCmdline.data(),
+      /*lpProcessAttributes=*/nullptr, /*lpThreadAttributes=*/nullptr,
+      /*bInheritHandles=*/TRUE, CREATE_UNICODE_ENVIRONMENT,
+      haveEnv ? static_cast<LPVOID>(&envBlock[0]) : nullptr,
+      /*lpCurrentDirectory=*/nullptr, &si, &pi);
+
+  if (!ok)
+    return errnoFromWin32(::GetLastError());
+
+  // The thread handle is of no interest; the process handle is retained.
+  ::CloseHandle(pi.hThread);
+  rememberChild(pi.dwProcessId, pi.hProcess);
+  *pid = static_cast<int>(pi.dwProcessId);
+  return 0;
+}
+
+/// POSIX waitpid(2), for children spawned through posix_spawnp above.
+///
+/// `status` is encoded the way the standard library decodes it -- musl's
+/// layout, exit code in bits 8..15. One difference is deliberate: a process
+/// killed through kill() below is still reported as *exited* with that code
+/// rather than as signalled, because Windows keeps no record of a "signal"
+/// and Process.wait() raises outright on a status that has not exited.
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT int waitpid(int pid, int *status,
+                                                           int options) {
+  HANDLE h = handleForChild(static_cast<DWORD>(pid));
+  if (!h) {
+    errno = ECHILD;
+    return -1;
+  }
+
+  // WNOHANG is 1 on Linux; poll for it rather than blocking.
+  DWORD timeout = (options & 1) ? 0 : INFINITE;
+  DWORD waited = ::WaitForSingleObject(h, timeout);
+  if (waited == WAIT_TIMEOUT)
+    return 0; // Still running, as WNOHANG specifies.
+  if (waited != WAIT_OBJECT_0) {
+    setErrnoFromWin32();
+    return -1;
+  }
+
+  DWORD code = 0;
+  if (!::GetExitCodeProcess(h, &code)) {
+    setErrnoFromWin32();
+    return -1;
+  }
+
+  if (status)
+    *status = static_cast<int>((code & 0xff) << 8);
+  forgetChild(static_cast<DWORD>(pid));
+  return pid;
+}
+
+/// POSIX kill(2), restricted to what Windows can express.
+///
+/// Signal 0 is the existence probe and is answered without touching the
+/// process. Any other signal terminates it: Windows has no signal delivery, so
+/// there is no distinction between TERM and KILL here, and no opportunity for
+/// the child to handle it. The exit code is set to the signal number so the
+/// value survives into waitpid.
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT int kill(int pid, int sig) {
+  HANDLE h = handleForChild(static_cast<DWORD>(pid));
+  if (!h) {
+    errno = ESRCH;
+    return -1;
+  }
+
+  if (sig == 0)
+    return 0;
+
+  if (!::TerminateProcess(h, static_cast<UINT>(sig))) {
+    setErrnoFromWin32();
+    return -1;
+  }
+  return 0;
 }
 
 #endif // _WIN32

@@ -387,8 +387,15 @@ struct Process:
             Error: If the process fails to spawn.
         """
 
+        # Windows is spawned through the same posix_spawnp call: the runtime
+        # shim implements it on CreateProcessW, so nothing above this line
+        # needs to know the difference. See KGEN/lib/CompilerRT/PosixWin32.cpp
+        # and docs/win32_posix_shim.md for what that emulation does and does
+        # not preserve.
         comptime assert (
-            CompilationTarget.is_linux() or CompilationTarget.is_macos()
+            CompilationTarget.is_linux()
+            or CompilationTarget.is_macos()
+            or CompilationTarget.is_windows()
         ), "Unknown platform process execution not implemented"
         var parts = path.split(sep)
         var file_name = String(parts[len(parts) - 1])

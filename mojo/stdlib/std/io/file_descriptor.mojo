@@ -112,14 +112,29 @@ struct FileDescriptor(TrivialRegisterPassable, Writer):
         ), "`read_bytes()` is not yet implemented for GPUs."
 
         comptime assert (
-            CompilationTarget.is_macos() or CompilationTarget.is_linux()
+            CompilationTarget.is_macos()
+            or CompilationTarget.is_linux()
+            or CompilationTarget.is_windows()
         ), "`read_bytes()` is not yet implemented for unknown platform."
-        var read = external_call["read", c_ssize_t](
-            self.value, buffer.unsafe_ptr(), len(buffer)
-        )
-        if read < 0:
-            raise Error("Failed to read bytes.")
-        return read
+
+        comptime if CompilationTarget.is_windows():
+            # The CRT spells this `_read` and returns `int`, not `ssize_t`.
+            # Reading a 32-bit return as 64 bits would turn the -1 failure
+            # into 4294967295, and the check below would never fire -- the
+            # caller would take a bogus length for a successful read.
+            var read32 = external_call["read", c_int](
+                c_int(self.value), buffer.unsafe_ptr(), len(buffer)
+            )
+            if read32 < 0:
+                raise Error("Failed to read bytes.")
+            return Int(read32)
+        else:
+            var read = external_call["read", c_ssize_t](
+                self.value, buffer.unsafe_ptr(), len(buffer)
+            )
+            if read < 0:
+                raise Error("Failed to read bytes.")
+            return read
 
     def isatty(self) -> Bool:
         """Checks whether a file descriptor refers to a terminal.

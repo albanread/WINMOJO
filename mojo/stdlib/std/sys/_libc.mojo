@@ -190,6 +190,17 @@ def _get_environ() -> (
             OptionalPointer[NoneType, MutUntrackedOrigin](),
             "environ".as_c_string_slice().ptr(),
         ).value()[]
+    elif CompilationTarget.is_windows():
+        # Windows keeps two environments: the CRT's `_environ` array and the
+        # Win32 block that CreateProcessW actually copies into a child. They
+        # can disagree, so marshalling one into the other would be a way to
+        # introduce a bug rather than fix one.
+        #
+        # A null envp means "inherit" to the shim's posix_spawnp, which then
+        # lets CreateProcessW pass the real block through untouched. That is
+        # precisely what every caller of this function asks for, so the null
+        # is the accurate answer here and not a missing implementation.
+        return {}
     else:
         CompilationTarget.unsupported_target_error[operation="_get_environ"]()
 
