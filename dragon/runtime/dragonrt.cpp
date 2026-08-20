@@ -29,6 +29,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <cstdio>
+#include <cctype>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -614,6 +615,32 @@ __declspec(dllexport) const char *AsyncRT_DeviceContext_loadFunction(
     cl_program prog = nullptr;
 
     bool isSpirv = dataLen >= 4 && memcmp(data, &kSpirvMagic, 4) == 0;
+
+    /* DRAGONRT_DUMP_SPV=<dir>: write every SPIR-V module byte-exactly as the
+     * driver will see it, BEFORE ingestion. This exists because bisecting a
+     * kernel-creation failure needs the real emitted module, not a
+     * reconstruction - and this hook captures it with no compiler round-trip.
+     * Filenames are the kernel name truncated to a sane length; mangled Mojo
+     * names run to hundreds of characters. */
+    if (isSpirv) {
+        if (const char *dumpDir = getenv("DRAGONRT_DUMP_SPV")) {
+            char fname[512];
+            char safe[101] = {0};
+            size_t j = 0;
+            for (size_t i = 0; functionName[i] && j < 100; ++i) {
+                char ch = functionName[i];
+                safe[j++] = (isalnum((unsigned char)ch) || ch == '_') ? ch : '_';
+            }
+            static std::atomic<int> dumpCounter{0};
+            snprintf(fname, sizeof(fname), "%s/%03d_%s.spv", dumpDir,
+                     dumpCounter.fetch_add(1), safe);
+            if (FILE *f = fopen(fname, "wb")) {
+                fwrite(data, 1, dataLen, f);
+                fclose(f);
+            }
+        }
+    }
+
     if (isSpirv) {
         if (!c->ilCreate)
             return errf(

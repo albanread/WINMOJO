@@ -1165,3 +1165,62 @@ invitation to the team: a concrete emission mechanism reverses this.
 
 The D3D12 tax: same kernel, both platforms, `DRAGONRT_PREFER` as the switch.
 Its size decides how urgent Route 3 is. Then: adreno_saxpy should PASS.
+
+---
+
+## 2026-08-19 — review of the team's clCreateKernel bisect; dump hook landed
+
+Their report reviewed and endorsed on method: the three-shape negative-space
+bisect (444-char name / +BuiltIn WorkgroupId / real saxpy signature — all
+callable when hand-built) is exactly the right move, and the
+CL_PROGRAM_NUM_KERNELS false-lead warning is a keeper. "Route 2 half-works"
+is the correct framing: ingestion fixed, kernel creation refused (-5).
+
+### Review findings added to theirs
+
+**-5 is not literally "out of resources".** On Mesa-derived CLOn12, per-kernel
+lowering (SPIR-V → NIR → DXIL) happens at clCreateKernel time; an internal
+lowering failure surfaces as CL_OUT_OF_RESOURCES with no build log. Read -5 as
+"the translator choked on this kernel", which also makes NUM_KERNELS=0 partly
+honest — zero kernels may genuinely have survived lowering for OUR module,
+even though the query is also unreliable on hand-built ones. Both readings
+coexist.
+
+**Suspect ranking, from their list of five.** Promote the Constant-decorated
+WorkgroupSize from "favourite" to prime suspect, for a sharper reason than
+oddness: `OpDecorate BuiltIn WorkgroupSize` on an OpConstantComposite is the
+**Vulkan spec-constant idiom** — GLCompute furniture. In kernel-flavor SPIR-V
+the local size arrives either via OpExecutionMode LocalSize or the builtin
+**Input variable**; a Constant-decorated builtin inside an OpenCL-flavor
+module is a shape Mesa's CL ingestion path has no rail for. And even if it
+were ingested, it *declares a fixed workgroup size* that will fight the
+runtime-chosen block dims at every enqueue — a second failure waiting behind
+the first. Likely origin: saxpy uses `block_dim.x`, and the team's new
+`llvm.spv.*` index lowering presumably maps block_dim to WorkgroupSize — in
+the constant form rather than the Input-variable form. If so the fix is in
+their new lowering branch: emit the variable form.
+
+Demote the rest with reasons: Int8 capability, ContractionOff, FuncParamAttr
+NoWrite and the OpenCL.std import are all standard clang-emitted furniture
+that CLOn12 digests daily from ordinary OpenCL C compilations (it passed 1.2
+conformance full of them). Merely importing OpenCL.std is harmless; only an
+exotic *instruction* from it would matter.
+
+### Unblock landed
+
+Their stated next step needs the emitted module, byte-exact. That capture
+point is our runtime: **`DRAGONRT_DUMP_SPV=<dir>`** now writes every SPIR-V
+blob loadFunction receives, before ingestion, named
+`NNN_<kernelname-truncated>.spv` (mangled Mojo names run to hundreds of
+characters). No compiler round-trip needed; the dump is literally what the
+driver sees. Rebuilt, ABI test still ALL PASS, pushed.
+
+Standing offer recorded: if they hand back a dumped module, our hand-encoder
+knowledge is sufficient for a word-level stripper (the SPIR-V instruction
+stream is trivially parseable) — progressive decoration-stripping without
+needing SPIRV-Tools on this box.
+
+Also: their broken-then-fixed push (escapes collapsed in transit) is the same
+heredoc gremlin that bit this session twice today, including in the dump hook
+itself (a path separator arrived over-escaped; now a forward slash, which the
+CRT accepts). Sympathy extended; range after d05d899 is clean.
