@@ -80,6 +80,7 @@ CLFN(cl_program, clCreateProgramWithSource, cl_context, cl_uint, const char **,
 CLFN(cl_program, clCreateProgramWithIL, cl_context, const void *, size_t, cl_int *)
 CLFN(cl_int, clBuildProgram, cl_program, cl_uint, const cl_device_id *, const char *,
      void *, void *)
+CLFN(cl_int, clGetProgramInfo, cl_program, cl_uint, size_t, void *, size_t *)
 CLFN(cl_int, clGetProgramBuildInfo, cl_program, cl_device_id, cl_uint, size_t, void *,
      size_t *)
 CLFN(cl_int, clReleaseProgram, cl_program)
@@ -114,6 +115,7 @@ static bool loadCL() {
     GET(clCreateCommandQueue) GET(clReleaseCommandQueue) GET(clCreateBuffer)
     GET(clReleaseMemObject) GET(clCreateProgramWithSource)
     GET(clCreateProgramWithIL) GET(clBuildProgram) GET(clGetProgramBuildInfo)
+    GET(clGetProgramInfo)
     GET(clReleaseProgram) GET(clCreateKernel) GET(clReleaseKernel)
     GET(clSetKernelArg) GET(clEnqueueWriteBuffer) GET(clEnqueueReadBuffer)
     GET(clEnqueueCopyBuffer) GET(clEnqueueFillBuffer)
@@ -675,8 +677,27 @@ __declspec(dllexport) const char *AsyncRT_DeviceContext_loadFunction(
 
     cl_kernel k = clCreateKernel(prog, functionName, &err);
     if (err != CL_SUCCESS) {
+        /* The requested name is several hundred characters of Mojo mangling,
+         * so "not found" and "found but rejected" look identical from the
+         * error code alone. Report what the built program actually contains:
+         * an empty list means the translation dropped the entry point, a
+         * populated one means the names disagree. */
+        std::string names;
+        size_t n = 0;
+        if (clGetProgramInfo(prog, 0x1166 /* CL_PROGRAM_KERNEL_NAMES */, 0,
+                             nullptr, &n) == CL_SUCCESS && n) {
+            names.assign(n, ' ');
+            clGetProgramInfo(prog, 0x1166, n, &names[0], nullptr);
+        }
+        cl_uint count = 0;
+        clGetProgramInfo(prog, 0x1167 /* CL_PROGRAM_NUM_KERNELS */,
+                         sizeof(count), &count, nullptr);
         clReleaseProgram(prog);
-        return errf("clCreateKernel('%s') failed: %d", functionName, err);
+        return errf("clCreateKernel failed: %d\n"
+                    "  wanted (%zu chars): %s\n"
+                    "  program has %u kernel(s): %s",
+                    err, strlen(functionName), functionName, count,
+                    names.empty() ? "(none)" : names.c_str());
     }
 
     auto *f = new DragonFunction();
