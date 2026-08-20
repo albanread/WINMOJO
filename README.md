@@ -172,6 +172,74 @@ so it measures speed and not correctness; and none of Mojo's actual selling
 points — SIMD, `parallelize`, GPU — are exercised at all. This is scalar
 single-threaded codegen, the part Mojo shares with every other LLVM language.
 
+### The compiler knows Windows
+
+![An animated Julia set, rendered by a Mojo pixel shader](docs/images/julia.png)
+
+That window is a native Mojo binary. It registers a window class whose window
+procedure is a Mojo function Windows calls directly, compiles the HLSL below it
+at run time with `D3DCompile`, drives the whole Direct3D 11 pipeline through
+COM, and holds 60fps against the display's measured refresh rate. The full
+source is [examples/win32/d3djulia.mojo](examples/win32/d3djulia.mojo); what
+makes it unusual is what is *not* in it. No vtable slot numbers, no GUIDs, no
+struct sizes, no field offsets. Every Windows-shaped fact is a query the
+compiler answers while compiling:
+
+```mojo
+# The layout is checked against Windows itself -- a disagreement is a build
+# failure, not memory corruption at the first call.
+comptime assert (
+    size_of[DXGI_SWAP_CHAIN_DESC]()
+    == winkb_struct_size["DXGI_SWAP_CHAIN_DESC"]()
+), "DXGI_SWAP_CHAIN_DESC does not match Windows"
+
+# A COM call, by interface and method name. The vtable slot -- 13, but nobody
+# typed that -- is looked up in the metadata during elaboration.
+var draw = com_method_of[
+    def (OpaquePointer[MutUntrackedOrigin], UInt32, UInt32)
+        thin abi("C") -> NoneType,
+    "ID3D11DeviceContext", "Draw",
+](context)
+
+# The window procedure is a Mojo function with the C ABI; Windows calls it
+# for every message the window receives.
+@export("mojo_wndproc")
+def mojo_wndproc(hwnd: Int, message: UInt32, wparam: Int, lparam: Int
+) abi("C") -> Int:
+    ...
+```
+
+How that works: this fork's compiler carries a copy of the Win32 API
+metadata -- 18,271 functions, 15,764 structs with byte-exact field offsets,
+7,912 COM interfaces with their IIDs and vtable orders -- as a SQLite
+database, and the elaborator can read it. `winkb_query` is a compile-time
+parameter expression alongside `get_env`, the same shape: a name goes in
+during elaboration, a constant comes out, and the query leaves no trace in
+the binary. `--emit asm` on a COM call shows exactly what a C++ compiler
+emits for `p->Release()`:
+
+```asm
+ldr  x8, [x19]        ; vtable from *this
+mov  x0, x19          ; this
+ldr  x8, [x8, #16]    ; slot 2 x 8 bytes -- the query, folded to an immediate
+blr  x8
+```
+
+The database is a declared toolchain input, so its content is part of every
+compile action's cache key, and `winkb_db_hash()` folds its SHA-256 into a
+binary at elaboration -- a build record can state exactly which metadata
+revision produced it. Releases ship the database beside the compiler as
+`lib/windows_api.db`.
+
+On top of the queries sit three small pieces in the standard library:
+`com_method_of` (the dispatcher above), `ComPtr` (COM refcounting mapped onto
+Mojo ownership: copy is AddRef, destruction is Release, and a move is
+provably neither -- with `adopt=` for pre-counted out-parameters and
+`query_interface[T]` inferring the IID from the type), and `Win32Module`
+(process-lifetime DLL cache). The metadata plumbing is
+[std/sys/_winkb.mojo](mojo/stdlib/std/sys/_winkb.mojo); the compiler side is
+`winkb_query` in the KGEN elaborator.
+
 ### Building
 
 Requires Windows 11 ARM64 and Visual Studio Build Tools (for the MSVC sysroot).
