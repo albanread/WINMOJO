@@ -165,6 +165,11 @@ build --@llvm-project//lldb:enable_libedit=true
 build --experimental_propagate_custom_flag=@llvm-project//lldb:enable_libedit
 build --@llvm-project//lldb:enable_curses=true
 build --experimental_propagate_custom_flag=@llvm-project//lldb:enable_curses
+# NOTE: a build:windows override of the two lldb flags above does NOT work:
+# --enable_platform_specific_config expands the platform section as if it
+# were at the START of the command line, so the unconditional lines outrank
+# it. The Windows disable lives in llvm-lldb-windows-dll.patch instead, as an
+# os constraint on the overlay's own config_settings.
 build --@llvm-project//llvm:pfm=disable
 build --experimental_propagate_custom_flag=@llvm-project//llvm:pfm
 build --@llvm-project//mlir:enable_cuda=true

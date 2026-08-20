@@ -1,0 +1,21 @@
+--- a/utils/bazel/llvm-project-overlay/clang/BUILD.bazel	2026-08-20 20:41:03.610472700 +0100
++++ b/utils/bazel/llvm-project-overlay/clang/BUILD.bazel	2026-08-20 20:41:03.679932300 +0100
+@@ -715,6 +715,18 @@
+ 
+ cc_library(
+     name = "basic",
++    # This tree links clang statically everywhere. Without CLANG_BUILD_STATIC,
++    # clang/Support/Compiler.h expands CLANG_ABI to dllimport on Windows: the
++    # defining TUs (AttrImpl.cpp and friends) then DROP their out-of-line
++    # bodies -- a dllimport definition is discarded -- and the first thing to
++    # actually link clang (lldb's expression parser) fails with hundreds of
++    # undefined __imp_?...@clang@@ symbols that exist in no archive at all.
++    # `defines` (not local_defines) on purpose: it must reach every dependent
++    # TU that includes a clang header, clang's own and lldb's alike.
++    defines = select({
++        "@platforms//os:windows": ["CLANG_BUILD_STATIC"],
++        "//conditions:default": [],
++    }),
+     srcs = [
+         "include/VCSVersion.inc",
+         "include/clang/Basic/Version.inc",

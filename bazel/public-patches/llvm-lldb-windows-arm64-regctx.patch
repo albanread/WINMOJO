@@ -1,0 +1,27 @@
+--- a/utils/bazel/llvm-project-overlay/lldb/source/Plugins/BUILD.bazel	2026-08-20 20:57:00.820245600 +0100
++++ b/utils/bazel/llvm-project-overlay/lldb/source/Plugins/BUILD.bazel	2026-08-20 21:00:44.920001300 +0100
+@@ -2527,12 +2527,22 @@
+ 
+ cc_library(
+     name = "PluginProcessWindowsCommon",
+-    srcs = glob(["Process/Windows/Common/*.cpp"]),
++    # Recursive on purpose: the per-architecture register contexts live in
++    # subdirectories (Common/arm64/RegisterContextWindows_arm64.cpp), and the
++    # non-recursive spelling compiled a plugin that could not construct a
++    # register context on ARM64. The hdrs glob below always recursed.
++    srcs = glob(["Process/Windows/Common/**/*.cpp"]),
+     hdrs = glob([
+         "Process/Windows/Common/*.h",
+         "Process/Windows/Common/**/*.h",
+     ]),
+-    includes = [".."],
++    # The per-architecture files include their parent's headers with bare
++    # names ("RegisterContextWindows.h"); CMake puts the Common directory on
++    # the include path, so the overlay must too.
++    includes = [
++        "..",
++        "Process/Windows/Common",
++    ],
+     tags = ["nobuildkite"],
+     target_compatible_with = select({
+         "@platforms//os:windows": [],

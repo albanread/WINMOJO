@@ -2000,3 +2000,115 @@ reuses build.sh's environment and adds `--target-accelerator` plus the DLL
 automatically when the source mentions the GPU. Also fixed in passing:
 `winstr_smoke.mojo` still imported `std.sys._windows_core`, the module's
 address before it became the `std.windows` package.
+
+## The lldb ladder: "blocked on LLDB" turns out to mean seven build bugs
+
+The REPL was recorded as blocked on lldb, unported. Recon says the word
+"unported" was doing no work at all:
+
+- lldb is in the vendored monorepo, and ~95% of it **compiled on day one**
+  inside the full-tree build — nobody noticed because nothing linked it.
+- The Mojo side is not stripped: `KGEN/lib/MojoLLDB` is 8.5k lines of open
+  plugin source (TypeSystem, Language, REPL, expression parser), with docs
+  and unit tests. `mojo repl` = spawn `mojo-lldb`, `plugin load MojoLLDB`,
+  `--repl-language mojo`. Modular even ships a static-embedding entry,
+  `LLDBPluginInitialize()`.
+- Upstream lldb has the Windows ARM64 host layer
+  (`NativeRegisterContextWindows_arm64` and friends).
+
+So the ladder is build engineering, and each rung was one loop of
+build → read the error → check lldb's own CMake for the truth → patch:
+
+1. **Action conflict.** The overlay's liblldb arrangement (extensionless
+   linkshared `cc_binary` + `cc_import` wrapper) makes two actions claim
+   `lldb24.0.0git.dll` on Windows. Patched: an explicit `.dll`-named target
+   on Windows, the POSIX one constrained away.
+2. **The bazelrc trap.** `build:windows` flag overrides silently do nothing:
+   `--enable_platform_specific_config` expands the platform section as if it
+   were at the START of the command line, so any unconditional line later in
+   the same file outranks it. An override that parses, looks right, and never
+   fires. The libedit/curses disables therefore live as `constraint_values`
+   on the overlay's own config_settings — a place rc-file ordering cannot
+   reach.
+3. **libedit/curses.** Force-enabled by upstream's bazelrc for every build;
+   neither exists on Windows. lldb's CMake disables both there; now the
+   overlay does too. All 1,640 lldb compile actions pass with them off.
+4. **`LLDB_IN_LIBLLDB`.** SBDefines.h picks dllexport only under this
+   define; the overlay never sets it, so every SB symbol compiled as an
+   IMPORT inside the library that defines it. Defined (Windows-only) on
+   `:API` and `:Interpreter`.
+5. **`ConnectionFileDescriptorPosix.cpp`.** Despite the path, CMake compiles
+   it unguarded on every platform — Windows uses it for socket-backed
+   connections. The overlay's Windows glob forgot it; Core references it.
+6. **`psapi` and `rpcrt4`.** CMake appends psapi under WIN32, and the UUID
+   helpers want the RPC runtime; the `llvm:Support` linkopts the link
+   inherits carry neither.
+7. **`CLANG_BUILD_STATIC` — the deep one.** lldb's expression parser is the
+   FIRST thing in this tree to actually link clang (mojo.exe never does), and
+   it failed with hundreds of `__imp_?...@clang@@` symbols defined in no
+   archive at all. This snapshot's DLL-export refactor put attr getters
+   out-of-line behind `CLANG_ABI`, which without `CLANG_BUILD_STATIC` expands
+   to dllimport on Windows — and a dllimport-flavoured DEFINITION is silently
+   dropped, so `AttrImpl.cpp` compiled to nothing. The define is now
+   transitive from `clang:basic` (`defines`, not `local_defines`, on
+   purpose: it must reach every TU that includes a clang header, clang's own
+   and lldb's alike).
+
+Patches: `llvm-lldb-windows-dll.patch`, `llvm-clang-static-abi.patch`, both
+in bazel/public-patches with the reasoning inline.
+
+**Known and accepted, next rung:** Bazel will not emit an import library for
+a linkshared `cc_binary` (the toolchain's `/IMPLIB:` receives the literal
+string "ignored"), so `liblldb.wrapper` is runtime-only on Windows and
+nothing can LINK against the DLL yet. The plan is the fused static
+`mojo-lldb.exe` — lldb driver + liblldb + MojoLLDB in one binary through the
+`LLDBPluginInitialize()` static entry — which sidesteps import libraries
+entirely and is closer to what Modular ships anyway.
+
+### The outcome: lldb debugs Mojo on Windows ARM64, the same evening
+
+Three more rungs past the seven:
+
+8. **The driver conflicted with the DLL a second way.** cc_binary's Windows
+   runtime handling copies dependency DLLs beside the consuming binary, and
+   with driver and library in the same package the copy's destination IS the
+   link's output path ("Copying Execution Dynamic Library" vs "Linking",
+   same file). The DLL target now lives at `dll/lldb24.0.0git.dll`.
+9. **The Windows driver links static.** With no import library to link the
+   DLL through, `:lldb` on Windows takes `:API` and `:Interpreter` directly
+   and comes out self-contained — 138 MB, and exactly the shape the fused
+   `mojo-lldb` wants anyway.
+10. **The driver needs the same system trio** (`psapi`, `rpcrt4`,
+    `dbghelp`) on its own link line.
+
+Then, verbatim from the first real session:
+
+```
+(lldb) b MultiByteToWideChar
+Breakpoint 1: no locations (pending).
+(lldb) run
+1 location added to breakpoint 1
+Process 18268 stopped
+* thread #1, stop reason = breakpoint 1.2
+    frame #0: 0x00007ffbe9b77170 KernelBase.dll`MultiByteToWideChar
+->  0x7ffbe9b77170 <+0>:  pacibsp
+(lldb) register read pc x0 x1 x2
+  pc = 0x00007ffbe9b77170  KernelBase.dll`MultiByteToWideChar
+  x0 = 0x00000000000004e4
+```
+
+A pending breakpoint resolving when KernelBase loads, a clean stop, ARM64
+registers, AArch64 disassembly, and a kill — against a Mojo-compiled binary
+(`winstr_smoke.exe`). `register read` is served by the very
+`RegisterContextWindows_arm64.cpp` that rung 5's recursive glob pulled in.
+
+Deliberately not claimed: source-level debugging (our AOT binaries carry no
+PDBs yet — `b main` stays pending) and the batch-mode `--stop-at-entry`
+event, which launches but does not report the stop. Both are their own
+work.
+
+**To the REPL from here:** build `//KGEN:MojoLLDB` against the now-linking
+liblldb (or fold it into a fused `mojo-lldb` driver via
+`LLDBPluginInitialize()`), point `mojo-max.lldb_path` and
+`.lldb_plugin_path` at the outputs, and `mojo repl` has everything it asked
+for. That is the next session's rung, not tonight's.
