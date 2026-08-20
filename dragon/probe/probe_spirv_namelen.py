@@ -57,6 +57,9 @@ def entry_point(fn_id, name, *interface):
     return [((len(body) + 1) << 16) | 15, *body]
 
 
+SPV_VERSION = [0x00010000]  # patched per case by main()
+
+
 def build_spirv(kernel_name, shape="minimal"):
     """The known-good module from probe_adreno_spirv.py, with a chosen name --
     and optionally the BuiltIn globals a real Mojo kernel declares."""
@@ -64,10 +67,14 @@ def build_spirv(kernel_name, shape="minimal"):
         return build_spirv_builtins(kernel_name)
     if shape == "saxpy":
         return build_spirv_saxpy(kernel_name)
+    if shape == "wgsize":
+        return build_spirv_wgsize(kernel_name)
+    if shape == "ptrchain":
+        return build_spirv_ptrchain(kernel_name)
     VOID, U32, PTR, FNTY, C42, FN, PARAM, LABEL = 1, 2, 3, 4, 5, 6, 7, 8
     bound = 9
 
-    words = [0x07230203, 0x00010000, 0, bound, 0]
+    words = [0x07230203, SPV_VERSION[0], 0, bound, 0]
     words += op(17, 4)                             # OpCapability Addresses
     words += op(17, 6)                             # OpCapability Kernel
     words += op(14, 2, 2)                          # OpMemoryModel Physical64 OpenCL
@@ -95,7 +102,7 @@ def build_spirv_builtins(kernel_name: str) -> bytes:
      U64, V3, PTRIN, BIVAR, LOADED) = range(1, 14)
     bound = 14
 
-    words = [0x07230203, 0x00010000, 0, bound, 0]
+    words = [0x07230203, SPV_VERSION[0], 0, bound, 0]
     words += op(17, 4)                       # OpCapability Addresses
     words += op(17, 6)                       # OpCapability Kernel
     words += op(17, 11)                      # OpCapability Int64
@@ -132,7 +139,7 @@ def build_spirv_saxpy(kernel_name):
      U64, V3, PTRIN, BIVAR, LOADED) = range(1, 16)
     bound = 16
 
-    words = [0x07230203, 0x00010000, 0, bound, 0]
+    words = [0x07230203, SPV_VERSION[0], 0, bound, 0]
     words += op(17, 4)
     words += op(17, 6)
     words += op(17, 11)
@@ -155,6 +162,84 @@ def build_spirv_saxpy(kernel_name):
     words += op(248, LABEL)
     words += op(61, V3, LOADED, BIVAR)
     words += op(62, P2, P3)
+    words += [(1 << 16) | 253]
+    words += [(1 << 16) | 56]
+    return struct.pack(f"<{len(words)}I", *words)
+
+
+def build_spirv_wgsize(kernel_name):
+    """The saxpy shape plus a Constant-decorated WorkgroupSize builtin --
+    the exact thing Mojo emits for block_dim under the SPIR-V lowering, and
+    the Vulkan spec-constant idiom rather than the OpenCL Input-variable
+    one. If this row fails where the plain saxpy row passes, this single
+    decoration is the whole bug.
+    """
+    (VOID, F32, PTR, FNTY, FN, P0, P1, P2, P3, LABEL,
+     U64, V3, PTRIN, BIVAR, LOADED, WGVAR, WGLOAD) = range(1, 18)
+    bound = 18
+
+    words = [0x07230203, SPV_VERSION[0], 0, bound, 0]
+    words += op(17, 4)
+    words += op(17, 6)
+    words += op(17, 11)
+    words += op(14, 2, 2)
+    words += entry_point(FN, kernel_name, BIVAR, WGVAR)
+    words += op(71, BIVAR, 11, 26)      # BuiltIn WorkgroupId
+    words += op(71, WGVAR, 22)          # Constant
+    words += op(71, WGVAR, 11, 25)      # BuiltIn WorkgroupSize
+    words += op(19, VOID)
+    words += op(22, F32, 32)
+    words += op(21, U64, 64, 0)
+    words += op(23, V3, U64, 3)
+    words += op(32, PTR, 5, F32)
+    words += op(32, PTRIN, 1, V3)
+    words += op(33, FNTY, VOID, PTR, PTR, PTR, F32)
+    words += op(59, PTRIN, BIVAR, 1)
+    words += op(59, PTRIN, WGVAR, 1)
+    words += op(54, VOID, FN, 0, FNTY)
+    words += op(55, PTR, P0)
+    words += op(55, PTR, P1)
+    words += op(55, PTR, P2)
+    words += op(55, F32, P3)
+    words += op(248, LABEL)
+    words += op(61, V3, LOADED, BIVAR)
+    words += op(61, V3, WGLOAD, WGVAR)
+    words += op(62, P2, P3)
+    words += [(1 << 16) | 253]
+    words += [(1 << 16) | 56]
+    return struct.pack(f"<{len(words)}I", *words)
+
+
+def build_spirv_ptrchain(kernel_name):
+    """saxpy shape plus OpInBoundsPtrAccessChain (opcode 70) -- the CL-flavor
+    pointer arithmetic Mojo emits for out[i], and the one instruction in the
+    real module that no passing probe used. Needs the Addresses capability,
+    which is CL-specific and therefore the likeliest gap in a Mesa-derived
+    SPIR-V to NIR path.
+    """
+    (VOID, F32, PTR, FNTY, FN, P0, P1, P2, P3, LABEL,
+     U32, ELEM, LOADED, IDX) = range(1, 15)
+    bound = 15
+
+    words = [0x07230203, 0x00010000, 0, bound, 0]
+    words += op(17, 4)
+    words += op(17, 6)
+    words += op(14, 2, 2)
+    words += entry_point(FN, kernel_name)
+    words += op(19, VOID)
+    words += op(22, F32, 32)
+    words += op(21, U32, 32, 0)
+    words += op(32, PTR, 5, F32)
+    words += op(33, FNTY, VOID, PTR, PTR, PTR, F32)
+    words += op(43, U32, IDX, 1)
+    words += op(54, VOID, FN, 0, FNTY)
+    words += op(55, PTR, P0)
+    words += op(55, PTR, P1)
+    words += op(55, PTR, P2)
+    words += op(55, F32, P3)
+    words += op(248, LABEL)
+    words += op(70, PTR, ELEM, P2, IDX)   # OpInBoundsPtrAccessChain
+    words += op(62, ELEM, P3)
     words += [(1 << 16) | 253]
     words += [(1 << 16) | 56]
     return struct.pack(f"<{len(words)}I", *words)
@@ -219,12 +304,13 @@ def main() -> int:
         return 1
 
     # The real kernel's name is 444 characters; bracket it generously.
-    print(f"{'name chars':>10}  {'shape':8}  {'build':>6}  {'kernels':>7}  verdict")
+    print(f"{'name chars':>10}  {'shape / version':17}  {'build':>6}  {'kernels':>7}  verdict")
     print(f"{'-' * 10}  {'-' * 8}  {'-' * 6}  {'-' * 7}  {'-' * 30}")
     first_failure = None
-    cases = [(8, "minimal"), (444, "minimal"), (444, "builtins"),
-             (8, "saxpy"), (444, "saxpy")]
-    for length, shape_name in cases:
+    cases = [(444, "saxpy", 0x00010000), (444, "ptrchain", 0x00010000),
+             (444, "ptrchain", 0x00010400)]
+    for length, shape_name, ver in cases:
+        SPV_VERSION[0] = ver
         name = "k" * length
         spv = build_spirv(name, shape_name)
         prog = il_create(ctx, spv, len(spv), byref(err))
@@ -242,7 +328,7 @@ def main() -> int:
         verdict = "callable" if ok else f"clCreateKernel {err.value}"
         if not ok and first_failure is None:
             first_failure = length
-        shape = f"{shape_name:8}"
+        shape = f"{shape_name:8} v{(ver >> 16) & 0xff}.{(ver >> 8) & 0xff}"
         print(
             f"{length:>10}  {shape}  {'ok' if rc == 0 else rc:>6}  "
             f"{count.value:>7}  {verdict}"
