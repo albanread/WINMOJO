@@ -126,3 +126,53 @@ def winkb_function_dll[name: StaticString]() -> StaticString:
         `> : !kgen.string`,
     ]
     return StaticString(res)
+
+
+def winkb_interface_iid[type_name: StaticString]() -> StaticString:
+    """The IID of a COM interface, from the metadata.
+
+    Parameters:
+        type_name: The interface name, e.g. "IStream".
+
+    Returns:
+        The textual GUID, e.g. "0000000c-0000-0000-c000-000000000046".
+    """
+    var res = __mlir_attr[
+        `#kgen.param.expr<winkb_query, `,
+        _get_kgen_string["interface_iid"](),
+        `, `,
+        _get_kgen_string[type_name](),
+        `> : !kgen.string`,
+    ]
+    return StaticString(res)
+
+
+def winkb_db_hash() -> StaticString:
+    """The SHA-256 of the metadata database this compilation is reading.
+
+    The reproducibility pin: a binary's build record can state exactly which
+    metadata revision its layouts and vtable slots came from.
+
+    Returns:
+        The hash as lowercase hex.
+    """
+    var res = __mlir_attr[
+        `#kgen.param.expr<winkb_query, `,
+        _get_kgen_string["db_hash"](),
+        `> : !kgen.string`,
+    ]
+    return StaticString(res)
+
+
+def winkb_db_schema_version() -> StaticString:
+    """The metadata database's own schema version.
+
+    Returns:
+        The schema version string.
+    """
+    var res = __mlir_attr[
+        `#kgen.param.expr<winkb_query, `,
+        _get_kgen_string["db_schema_version"](),
+        `> : !kgen.string`,
+    ]
+    return StaticString(res)

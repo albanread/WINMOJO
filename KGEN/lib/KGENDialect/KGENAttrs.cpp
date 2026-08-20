@@ -2547,8 +2547,8 @@ LogicalResult ParamOperatorAttr::verify(
     // (query, argument...) -- the first operand names the query, the rest are
     // its arguments. Two is enough for every query so far: a struct size takes
     // one name, a field offset takes a struct and a field.
-    if (operands.size() < 2 || operands.size() > 3)
-      return emitError() << "'winkb_query' expects a query name and one or two "
+    if (operands.size() < 1 || operands.size() > 3)
+      return emitError() << "'winkb_query' expects a query name and up to two "
                             "arguments";
     for (auto operand : operands)
       if (!::isa<StringType>(operand.getType()))

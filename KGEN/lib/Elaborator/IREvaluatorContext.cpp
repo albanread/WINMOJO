@@ -29,6 +29,10 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/ScopeExit.h"
 
+#include "llvm/ADT/StringExtras.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/SHA256.h"
+
 #include "sqlite3.h"
 
 #include <mutex>
@@ -885,6 +889,8 @@ private:
   sqlite3 *db = nullptr;
   bool attempted = false;
   std::string openError;
+  std::string openedPath;
+  std::string cachedHash;
 };
 
 /// The queries this exposes, by the name Mojo passes as the first operand.
@@ -916,7 +922,11 @@ constexpr StringRef kInterfaceIIDSQL =
 constexpr StringRef kFunctionDLLSQL =
     "SELECT dll_name FROM functions WHERE function_name = ?1";
 
+constexpr StringRef kSchemaVersionSQL =
+    "SELECT value FROM schema_meta WHERE key = 'schema_version'";
+
 const WinKBQueryDef kQueries[] = {
+    {"db_schema_version", 0, kSchemaVersionSQL},
     {"struct_size", 1, kStructSizeSQL},
     {"struct_align", 1, kStructAlignSQL},
     {"field_offset", 2, kFieldOffsetSQL},
@@ -948,6 +958,7 @@ llvm::Error WinKBDatabase::openLocked() {
 
   // Read-only, and never created: a missing database is a configuration error
   // to report, not an empty one to invent and then answer wrongly from.
+  openedPath = path;
   int rc = sqlite3_open_v2(path.c_str(), &db, SQLITE_OPEN_READONLY,
                            nullptr);
   if (rc != SQLITE_OK) {
@@ -1028,6 +1039,30 @@ llvm::Expected<int64_t> WinKBDatabase::queryInt(StringRef query,
 llvm::Expected<std::string>
 WinKBDatabase::queryString(StringRef query, ArrayRef<StringRef> args) {
   std::lock_guard<std::mutex> lock(mutex);
+
+  // The reproducibility pin: a compiler whose semantics depend on a database
+  // must be able to say WHICH database. Hashed lazily -- the file is 86 MB --
+  // and cached for the process, so release tooling and canary programs can
+  // record the exact metadata revision a binary was built against.
+  if (query == "db_hash") {
+    if (!args.empty())
+      return llvm::createStringError(llvm::inconvertibleErrorCode(),
+                                     "'db_hash' takes no arguments");
+    if (auto err = openLocked())
+      return std::move(err);
+    if (cachedHash.empty()) {
+      llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> bufferOr =
+          llvm::MemoryBuffer::getFile(openedPath, /*IsText=*/false);
+      if (!bufferOr)
+        return llvm::createStringError(
+            llvm::inconvertibleErrorCode(),
+            "cannot read the Win32 metadata database for hashing");
+      llvm::SHA256 sha;
+      sha.update((*bufferOr)->getBuffer());
+      cachedHash = llvm::toHex(sha.final(), /*LowerCase=*/true);
+    }
+    return cachedHash;
+  }
   auto stmt = prepare(query, args);
   if (!stmt)
     return stmt.takeError();

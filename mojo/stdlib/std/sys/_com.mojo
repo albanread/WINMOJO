@@ -14,7 +14,7 @@
 # ===----------------------------------------------------------------------=== #
 
 from std.memory import Pointer, OpaquePointer
-from std.sys._winkb import winkb_vtable_index
+from std.sys._winkb import winkb_interface_iid, winkb_vtable_index
 
 
 @always_inline
@@ -72,6 +72,186 @@ def com_method_of[
     return com_method[Sig, winkb_vtable_index[interface_name, method_name]()](
         this
     )
+
+
+def _hex_nibble(c: UInt8) -> Int:
+    if c >= UInt8(ord("0")) and c <= UInt8(ord("9")):
+        return Int(c) - ord("0")
+    if c >= UInt8(ord("a")) and c <= UInt8(ord("f")):
+        return Int(c) - ord("a") + 10
+    return Int(c) - ord("A") + 10
+
+
+def _guid_bytes(text: StaticString) -> List[UInt8]:
+    """The 16 bytes COM expects for a textual GUID.
+
+    Not text order: the first three groups are little-endian integers and the
+    last eight bytes literal. Wrong order yields E_NOINTERFACE, which looks
+    like an unsupported interface rather than a mangled identifier.
+    """
+    var digits = List[UInt8]()
+    for byte in text.as_bytes():
+        if byte != UInt8(ord("-")):
+            digits.append(byte)
+
+    var raw = List[UInt8]()
+    for i in range(16):
+        raw.append(
+            UInt8(
+                _hex_nibble(digits[i * 2]) * 16 + _hex_nibble(digits[i * 2 + 1])
+            )
+        )
+
+    var out = List[UInt8]()
+    out.append(raw[3])
+    out.append(raw[2])
+    out.append(raw[1])
+    out.append(raw[0])
+    out.append(raw[5])
+    out.append(raw[4])
+    out.append(raw[7])
+    out.append(raw[6])
+    for i in range(8, 16):
+        out.append(raw[i])
+    return out^
+
+
+struct ComPtr[interface_name: StaticString](Boolable, Copyable, Movable):
+    """An owning COM interface pointer whose refcounting is the type's
+    ownership semantics.
+
+    The mapping is exact, and the compiler proves it instead of a reviewer
+    auditing it:
+
+    - copying AddRefs;
+    - destruction Releases;
+    - a move does neither, because `deinit move` consumes the source without
+      running its destructor -- so idiomatic Mojo passing interface pointers
+      around elides AddRef/Release pairs that C++ smart pointers pay on every
+      copy.
+
+    Construction from an out-parameter uses `adopt=`, which deliberately does
+    NOT AddRef: COM out-parameters arrive with the callee's reference already
+    counted, and the adopter takes ownership of it. AddReffing there leaks;
+    failing to AddRef on a copy crashes. Both directions are now the
+    compiler's problem.
+
+    Parameters:
+        interface_name: The COM interface, e.g. "IStream". Used to infer the
+            IID for `query_interface`, so a GUID never appears in user code
+            and an IID/type mismatch is not expressible.
+    """
+
+    var _address: Int
+
+    def __init__(out self, *, adopt: Int):
+        """Takes ownership of a pre-AddRef'd interface pointer.
+
+        This is the out-parameter convention: the reference being adopted is
+        the one the callee already counted, so no AddRef happens here.
+
+        Args:
+            adopt: The raw interface pointer, as received from an out-param.
+        """
+        self._address = adopt
+
+    def __init__(out self, *, copy: Self):
+        """Copies the pointer and AddRefs the underlying object.
+
+        Args:
+            copy: The value being copied.
+        """
+        self._address = copy._address
+        if self._address != 0:
+            _ = com_method[
+                def (
+                    OpaquePointer[MutUntrackedOrigin]
+                ) thin abi("C") -> UInt32,
+                winkb_vtable_index["IUnknown", "AddRef"](),
+            ](copy.interface())(copy.interface())
+
+    def __init__(out self, *, deinit move: Self):
+        """Moves the pointer; the refcount is untouched.
+
+        The source is consumed without its destructor running, so the
+        AddRef/Release pair a copy would cost is elided entirely.
+
+        Args:
+            move: The value being moved from.
+        """
+        self._address = move._address
+
+    def __deinit__(deinit self):
+        """Releases the underlying object, if any."""
+        if self._address != 0:
+            _ = com_method[
+                def (
+                    OpaquePointer[MutUntrackedOrigin]
+                ) thin abi("C") -> UInt32,
+                winkb_vtable_index["IUnknown", "Release"](),
+            ](self.interface())(self.interface())
+
+    def __bool__(self) -> Bool:
+        """Whether a pointer is held.
+
+        Returns:
+            True if non-null.
+        """
+        return self._address != 0
+
+    def interface(self) -> OpaquePointer[MutUntrackedOrigin]:
+        """The raw interface pointer, for `com_method` calls.
+
+        Returns:
+            The pointer; ownership stays with this value.
+        """
+        return OpaquePointer[MutUntrackedOrigin](
+            unsafe_from_address=self._address
+        )
+
+    def query_interface[
+        Target: StaticString
+    ](self) raises -> ComPtr[Target]:
+        """Asks the object for another interface, IID inferred from the type.
+
+        The returned pointer arrives pre-AddRef'd from QueryInterface and is
+        adopted, so the count stays exact.
+
+        Parameters:
+            Target: The interface to request, e.g. "ISequentialStream".
+
+        Returns:
+            An owning pointer to the requested interface.
+
+        Raises:
+            If the object does not implement it (E_NOINTERFACE), or the
+            pointer is null.
+        """
+        if self._address == 0:
+            raise Error("query_interface on a null ComPtr")
+
+        var iid = _guid_bytes(winkb_interface_iid[Target]())
+        var out_address: Int = 0
+        var hr = com_method[
+            def (
+                OpaquePointer[MutUntrackedOrigin],
+                Pointer[UInt8, MutAnyOrigin],
+                Pointer[Int, MutAnyOrigin],
+            ) thin abi("C") -> Int32,
+            winkb_vtable_index["IUnknown", "QueryInterface"](),
+        ](self.interface())(
+            self.interface(),
+            iid.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin](),
+            Pointer(to=out_address).unsafe_origin_cast[MutAnyOrigin](),
+        )
+        if hr != 0:
+            raise Error(
+                "QueryInterface for "
+                + String(Target)
+                + " failed, hr = "
+                + String(hr)
+            )
+        return ComPtr[Target](adopt=out_address)
 
 
 # ===----------------------------------------------------------------------=== #

@@ -1654,3 +1654,39 @@ it became the #16. Zero cost, in the literal sense.
 
 Working examples preserved under examples/win32/: the idiom test, the
 metadata queries, and the Direct3D window.
+
+---
+
+## ComPtr: refcounting as ownership, and the count agrees
+
+Feedback worth acting on immediately: COM's refcounting protocol IS Mojo's
+ownership model, member for member. Copying is AddRef, destruction is
+Release, and a move -- `deinit move`, which consumes the source without
+running its destructor -- is *nothing at all*. That last one is the part C++
+cannot express as cheaply: CComPtr pays an AddRef on every copy it cannot
+prove away, while Mojo's transfers are elided by construction.
+
+Two rules the metadata makes mechanical rather than reviewable. An adopted
+out-parameter is NOT AddRef'd, because COM out-params arrive with the
+callee's reference already counted -- getting that wrong in one direction
+leaks and in the other crashes, and it is now the constructor's contract
+rather than a review comment. And `query_interface[Target]` infers the IID
+from the type parameter via `winkb_interface_iid`, so a GUID never appears
+in user code and an IID/type mismatch is not expressible.
+
+The whole model is asserted, not argued: AddRef returns the new count, so
+examples/win32/comptr.mojo walks a live IStream through
+adopt(1) copy(2) move(2) QI(3) drops(1), and an unrelated QueryInterface
+raises instead of corrupting. The move line reading 2 is the entire pitch.
+
+Same commit, same origin: the compiler now pins the metadata it built
+against. `winkb_db_hash()` folds the SHA-256 of the database into the binary
+at elaboration -- 8cc64439... for the current file -- so a build record can
+say exactly which metadata revision produced a given binary. A compiler
+whose semantics depend on a database needs to be able to answer that.
+
+Still on the table from the same feedback: lowering the three Win32 error
+conventions (HRESULT, BOOL+GetLastError, sentinel HANDLEs -- the metadata
+knows which is which) into `raises`, and emitting vtables instead of
+dispatching over them for server-side COM. The dispatcher's table read is
+direction-agnostic.
