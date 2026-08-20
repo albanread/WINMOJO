@@ -1,4 +1,4 @@
-load("//bazel:api.bzl", "lit_tests", "mojo_filecheck_test", "mojo_test")
+load("//bazel:api.bzl", "lit_tests", "modular_cc_binary", "mojo_filecheck_test", "mojo_test")
 
 package(default_visibility = ["//visibility:private"])
 
@@ -20,6 +20,42 @@ _ENV = {
     "test_env.mojo": {"TEST_MYVAR": "MyValue"},
 }
 
+# test_process spawns echo, sleep and printenv. None of those is an executable
+# on Windows -- `echo` is a cmd builtin and the other two are absent -- so the
+# test has nothing to spawn there however well posix_spawnp works.
+#
+# These stand-ins are declared in this package so they are built into the same
+# output directory as the test binary. That directory is the first one
+# SearchPathW consults, which is how the shim resolves a bare program name, so
+# they are found ahead of anything on PATH and the test does not depend on what
+# the machine happens to have installed.
+[
+    modular_cc_binary(
+        name = tool,
+        srcs = ["support/{}.c".format(tool)],
+        target_compatible_with = select({
+            "@platforms//os:windows": [],
+            "//conditions:default": ["@platforms//:incompatible"],
+        }),
+    )
+    for tool in [
+        "echo",
+        "printenv",
+        "sleep",
+    ]
+]
+
+_DATA = {
+    "test_process.mojo": select({
+        "@platforms//os:windows": [
+            ":echo",
+            ":printenv",
+            ":sleep",
+        ],
+        "//conditions:default": [],
+    }),
+}
+
 _EXPECT_CRASH = [
     "test_trap.mojo",
     "test_trap_gpu.mojo",
@@ -33,6 +69,7 @@ _EXPECT_CRASH = [
             "--debug-level",
             "full",
         ],
+        data = _DATA.get(src, []),
         expect_crash = src in _EXPECT_CRASH,
         deps = [
             "@mojo//:std",

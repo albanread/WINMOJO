@@ -95,11 +95,11 @@ Full stdlib test census, native Windows ARM64:
 
 | Result | Targets |
 | --- | --- |
-| pass | **207** |
-| fail | 89 |
-| fail to build | 15 |
+| pass | **258** |
+| fail | 52 |
+| fail to build | 4 |
 | skipped (platform-gated) | 55 |
-| **total** | **366** |
+| **total** | **369** |
 
 `mojo.exe` builds, links, parses, compiles and runs Mojo. The stdlib compiles to
 `std.mojoc` with warnings only and required no source changes. The remaining
@@ -330,7 +330,7 @@ codebase are not a packaging choice — they are undefined behaviour.
 | dependencies | LLVM, MLIR, gRPC, protobuf, abseil, boringssl, curl, zlib-ng all compile. |
 | `mojo.exe` | Builds, links, parses and compiles Mojo on Windows ARM64. |
 | stdlib | Compiles to `std.mojoc` with warnings only — no source changes required. |
-| tests | 207 of 366 targets pass; 89 fail, 15 fail to build, 55 platform-skipped. |
+| tests | 258 of 369 targets pass; 52 fail, 4 fail to build, 55 platform-skipped. |
 | next | Drive down the failures, then performance against CPython. |
 
 > **Reading the tree yourself?** Start at `KGEN/tools/mojo/mojo.cpp` and follow a
