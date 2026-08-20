@@ -1062,3 +1062,44 @@ AI clauses do not exist.
 Also flagged: trademarks are a separate axis ("maxdragon" leads with their
 mark; cheap to rename if this grows commercial weight), and Qualcomm's QAIRT
 LICENSE.pdf is the document to read before the NPU line ever ships Qnn DLLs.
+
+---
+
+## 2026-08-19 — DEBAZEL: the design and sprint to excise Bazel (design only)
+
+Directive: get rid of Bazel, replace with something simple and fast; design
+and sprint first, no implementation. Done — `dragon/design/DEBAZEL.md`.
+
+The audit that grounds it: **619 BUILD.bazel files** (391 in `max/`, irrelevant
+to `mojo.exe`), **40,897 lines** of `.bzl` under `bazel/`, ~25 external deps of
+which most are CI-shaped (rules_js/ts, gazelle, buildifier, mypy, otel, grpc),
+and the 115 GB output tree. Against that, the actual build of mojo.exe reduces
+to three jobs: LLVM+MLIR from source (rarely), **31 gentbl rules**, and ~700
+C++ files plus one stdlib packaging step.
+
+Modular's own `why-bazel.md` was read first and answered on its merits: every
+benefit it lists (hermetic vendored toolchains, remote execution, shared
+cache, multi-language at org scale) accrues to Modular's infrastructure, none
+of which reaches this machine — the vendored toolchain doesn't even exist for
+Windows ARM64, which is why WINMOJO had to write one. Their cost-benefit, our
+costs.
+
+The load-bearing design idea: **use Bazel once, to escape Bazel.** The BUILD
+files are a machine-readable spec, and `bazel aquery --output=jsonproto` emits
+the entire action graph with literal command lines. A ~250-line translator
+turns that into a checked-in `build.ninja`, so the first non-Bazel build is
+command-identical to the Bazel one — parity by construction. LLVM itself
+moves to a frozen CMake/Ninja prefix built once (its native build system).
+Endgame: a small owned generator replaces the export; Bazel's engine is
+deleted; the 619 BUILD files stay as inert fossils so upstream rebases don't
+become six hundred merge conflicts.
+
+Sprint: **B0** ground truth (aquery counts) → **B1** frozen LLVM prefix
+(independently useful — it's also the SDK for the BCPL/BASIC offload ideas) →
+**B2** exporter → **B3 parity gate** (ninja-built mojo.exe passes the same lit
+subset; nothing is deleted before this passes twice) → **B4** re-point +
+stdlib + lit → **B5** owned generator → **B6** excision, 115 GB reclaimed.
+B0–B2 need only an *analysable* Bazel, which WINMOJO's G3 already achieved —
+the ladder can start before KGEN builds.
+
+Not started, per instruction. The go decision is the user's.
