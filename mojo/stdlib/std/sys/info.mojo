@@ -1059,13 +1059,27 @@ def is_amd_gpu[subarch: StaticString]() -> Bool:
 
 
 @always_inline("nodebug")
+def is_spirv_gpu() -> Bool:
+    """Returns True if compiling for a SPIR-V GPU target -- the Adreno offload
+    line, where kernels are emitted as SPIR-V and lowered by the vendor driver
+    -- and False otherwise.
+
+    Returns:
+        True if the target triple is `spirv64-unknown-unknown`.
+    """
+    return is_triple["spirv64-unknown-unknown"]()
+
+
+@always_inline("nodebug")
 def is_gpu() -> Bool:
     """Returns True if the target triple is GPU and False otherwise.
 
     Returns:
         True if the triple target is GPU and False otherwise.
     """
-    return is_nvidia_gpu() or is_amd_gpu() or is_apple_gpu()
+    return (
+        is_nvidia_gpu() or is_amd_gpu() or is_apple_gpu() or is_spirv_gpu()
+    )
 
 
 @always_inline("nodebug")

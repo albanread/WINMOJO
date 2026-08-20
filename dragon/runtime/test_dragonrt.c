@@ -6,6 +6,7 @@
  * strings owned by the caller, uint32 launch dimensions.
  */
 
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

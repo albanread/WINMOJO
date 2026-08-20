@@ -125,7 +125,12 @@ def _process_mojo_deps(deps):
             new_deps.append("@modular_wheel//:" + dep.split("/")[-1])
             imports_max = True
         elif dep == "//MLRT:Driver/DeviceContext":
-            new_deps.append("@modular_wheel//:AsyncRTMojoBindings_lib")
+            # Upstream remaps this to Modular's prebuilt wheel, which does not
+            # exist for Windows ARM64 and which this fork's licensing bright
+            # line forbids introducing regardless. The accelerator half of the
+            # device ABI comes from DragonMax's runtime instead -- the same
+            # AsyncRT_* C symbols, from source (docs/SNAPDRAGON-GPU.md, D2).
+            new_deps.append("//dragon/runtime:dragonrt")
         elif dep == "//KGEN:CompilerRT":
             needs_compiler_rt = True
         else:

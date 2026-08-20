@@ -153,3 +153,114 @@ the same deal NVIDIA gets. The winkb metadata line and this one converge
 later: a `d3djulia` whose pixel shader is a **Mojo kernel** instead of HLSL
 is the demo that closes the "cheating" era, and after SG4 it is roughly a
 weekend, not a project.
+
+---
+
+# Execution log: SG0-SG4, and where the line actually stops
+
+SG0-SG3 are done. SG4 gets within one driver call of the finish line.
+
+**SG0 - merge.** 23 `[dragonmax]` commits, one conflict (README; kept ours,
+theirs being DragonMax's identity). Every invariant verified: `"SPIRV"` in
+`BACKENDS`, the `.gitignore` re-includes, all three `Spirv/` source
+directories, the stdlib target, the plugin, the runtime.
+
+**SG1 - the rebuild, plus two build-system bugs of our own.** The predicted
+LLVM re-key happened (7,352 actions, 2,033s). Neither failure along the way
+was on DragonMax's bounce-back list:
+
+- A transient: the first build raced the overlay re-materialisation.
+- The real one. Re-fetching `@llvm-project` under our
+  `--windows_enable_symlinks` turned the overlay from copies into **relative
+  symlinks** (`llvm -> ..\+llvm_source+llvm-raw\llvm`). Windows resolves a
+  relative symlink *lexically against the path traversed*, and actions reach
+  the repo through `execroot/_main/external/`, where `..` finds nothing --
+  because Bazel plants a repo into that forest only when one of its files is
+  an action input, and nothing inputs raw LLVM sources; they are only symlink
+  *targets*. Every hand probe passed (absolute paths resolve); only the
+  action's relative path failed, on a different file each run as the action
+  cache advanced. Fix: `@llvm-raw//:README.md` as data on the toolchain's
+  resource-dir args, making one llvm-raw file an input to every compile.
+
+Bounce-backs 1-3 never fired: their three source directories compiled
+unmodified and the globs absorbed them, alwayslink intact.
+
+**SG2 - registration and codegen, both green.**
+`--print-supported-accelerators` lists `Qualcomm Adreno (DragonMax)`, and
+`--emit=asm` produces a SPIR-V sidecar with `OpCapability Kernel`,
+`OpEntryPoint Kernel`, and `BuiltIn WorkgroupId/WorkgroupSize/
+LocalInvocationId`.
+
+That needed work the handoff did not anticipate. `thread_idx`, `block_idx`
+and `block_dim` dispatch on target inside `std/gpu/primitives/id.mojo`, and
+the chain knew NVVM, AMDGCN and AIR only -- so the kernel failed to
+instantiate before codegen ran. Added `is_spirv_gpu()` to
+`std/sys/info.mojo` (and to `is_gpu()`, or every GPU-gated path treats
+SPIR-V kernels as host code), plus three branches over
+`llvm.spv.thread.id.in.group` / `llvm.spv.group.id` /
+`llvm.spv.workgroup.size`. Shape difference worth noting: SPIR-V takes the
+dimension as an *argument* (0/1/2) where the others suffix the name.
+
+**SG3 - the runtime, under Bazel.** `//dragon/runtime:dragonrt` and its
+smoke test build with the hermetic toolchain and the dynamic CRT, replacing
+the `cl /LD` recipe (D2). The wheel remap in `bazel/api.bzl` -- which
+upstream points at a prebuilt that does not exist for Windows ARM64 and that
+our licensing line forbids anyway -- now resolves
+`//MLRT:Driver/DeviceContext` to dragonrt. That is what made `//max:max_mojo`
+build: the `max` Mojo package, 6,997 lines of `DeviceContext`, is already in
+our dialect and needed no porting.
+
+**SG4 - built, ran, stopped at the driver.** The ported test
+(`examples/win32/adreno_saxpy.mojo`: `fn` to `def`, `out` to `dst` since
+`out` is reserved, pointer spelling) compiles for `adreno-x1`, links against
+`dragonrt.lib`, and runs. Two ABI drifts surfaced and were fixed in the
+runtime:
+
+- `AsyncRT_DeviceBuffer_context` did not exist; `ctx` was already in the
+  struct, so it is a one-line accessor.
+- Host/device copies now route through the single buffer-to-buffer entry
+  point, where a host buffer arrives with `hostPtr` set and `mem` null.
+  `DtoD_async` assumed two `cl_mem`s and died `CL_INVALID_MEM_OBJECT (-38)`.
+  It now dispatches on shape across all four combinations.
+
+## Where it stops, and why it is not a bug
+
+```
+clCreateProgramWithIL failed: -59   (CL_INVALID_OPERATION)
+```
+
+Probed live, both OpenCL platforms on this box:
+
+| Platform | `CL_DEVICE_IL_VERSION` | `cl_khr_il_program` |
+|---|---|---|
+| QUALCOMM Snapdragon(TM) | *(empty)* | **no** |
+| OpenCLOn12 | SPIR-V_1.0 | yes |
+
+**Qualcomm's OpenCL driver on this device cannot ingest SPIR-V.** Not a
+version mismatch, not a flag: the extension is absent and the IL version
+string is empty, so `clCreateProgramWithIL` is required to fail. The compile
+line is complete and correct -- Mojo emits valid SPIR-V for the Adreno --
+but this driver will not accept that *form*.
+
+Note the irony, since the handoff leaned on it: the OpenCLOn12 platform does
+take SPIR-V, and it reaches the same GPU through D3D12. On this machine, the
+path with IL support is the path the Julia demo used.
+
+## The three ways forward
+
+1. **Source hand-off.** Qualcomm's driver compiles OpenCL C
+   (`clCreateProgramWithSource` -- DragonMax's D1b probe proved it, and
+   dragonrt already uses it in its own smoke test). Emitting OpenCL C rather
+   than SPIR-V from the same KGEN backend point keeps everything else. This
+   is exactly the Apple-AIR trick DRAGONMAX.md cites: hand the vendor a form
+   its driver accepts.
+2. **SPIR-V through OpenCLOn12.** One `strstr` in `pickQualcomm`, and the
+   existing pipeline may work unmodified -- but it routes through D3D12
+   rather than the native driver, which the project would need to accept
+   knowingly, and its performance on this part is unmeasured.
+3. **Vulkan compute.** Vulkan on Adreno takes SPIR-V natively. Already
+   DragonMax's own contingency (`adreno_vk`, "only if OpenCL's compiler
+   disappoints"). It disappointed -- differently than expected.
+
+Route 1 is the smallest change and the only one keeping the native driver.
+Route 3 is the most robust and the most work.

@@ -32,6 +32,7 @@ from std.sys.info import (
     is_apple_gpu,
     is_gpu,
     is_nvidia_gpu,
+    is_spirv_gpu,
 )
 from std.sys.intrinsics import readfirstlane
 from std.memory import AddressSpace
@@ -201,6 +202,19 @@ def sm_id() -> Int:
         ]()
 
 
+@always_inline("nodebug")
+def _spv_dim[dim: StaticString]() -> UInt32:
+    """SPIR-V spells the dimension as an intrinsic argument (0/1/2), not a
+    name suffix the way NVVM and AMDGCN do."""
+    comptime if dim == "x":
+        return 0
+    elif dim == "y":
+        return 1
+    else:
+        comptime assert dim == "z"
+        return 2
+
+
 # ===-----------------------------------------------------------------------===#
 # thread_idx
 # ===-----------------------------------------------------------------------===#
@@ -240,9 +254,17 @@ struct _ThreadIdx[ResultType: _FromInt](Defaultable, TrivialRegisterPassable):
             The `x`, `y`, or `z` coordinates of a thread within a block.
         """
         _verify_xyz[dim]()
-        comptime intrinsic_name = Self._get_intrinsic_name[dim]()
-        var i = llvm_intrinsic[intrinsic_name, UInt32, has_side_effect=False]()
-        return Self.ResultType(from_int=Int(i))
+        comptime if is_spirv_gpu():
+            var i = llvm_intrinsic[
+                "llvm.spv.thread.id.in.group", UInt32, has_side_effect=False
+            ](_spv_dim[dim]())
+            return Self.ResultType(from_int=Int(i))
+        else:
+            comptime intrinsic_name = Self._get_intrinsic_name[dim]()
+            var i = llvm_intrinsic[
+                intrinsic_name, UInt32, has_side_effect=False
+            ]()
+            return Self.ResultType(from_int=Int(i))
 
 
 comptime thread_idx = _ThreadIdx[Int]()
@@ -288,9 +310,17 @@ struct _BlockIdx[ResultType: _FromInt](Defaultable, TrivialRegisterPassable):
             The `x`, `y`, or `z` coordinates of a block within a grid.
         """
         _verify_xyz[dim]()
-        comptime intrinsic_name = Self._get_intrinsic_name[dim]()
-        var i = llvm_intrinsic[intrinsic_name, UInt32, has_side_effect=False]()
-        return Self.ResultType(from_int=Int(i))
+        comptime if is_spirv_gpu():
+            var i = llvm_intrinsic[
+                "llvm.spv.group.id", UInt32, has_side_effect=False
+            ](_spv_dim[dim]())
+            return Self.ResultType(from_int=Int(i))
+        else:
+            comptime intrinsic_name = Self._get_intrinsic_name[dim]()
+            var i = llvm_intrinsic[
+                intrinsic_name, UInt32, has_side_effect=False
+            ]()
+            return Self.ResultType(from_int=Int(i))
 
 
 comptime block_idx = _BlockIdx[Int]()
@@ -318,7 +348,12 @@ struct _BlockDim[ResultType: _FromInt](Defaultable, TrivialRegisterPassable):
         """
         _verify_xyz[dim]()
 
-        comptime if is_nvidia_gpu():
+        comptime if is_spirv_gpu():
+            var spv = llvm_intrinsic[
+                "llvm.spv.workgroup.size", UInt32, has_side_effect=False
+            ](_spv_dim[dim]())
+            return Self.ResultType(from_int=Int(spv))
+        elif is_nvidia_gpu():
             comptime intrinsic_name = "llvm.nvvm.read.ptx.sreg.ntid." + dim
             var i = llvm_intrinsic[
                 intrinsic_name, Int32, has_side_effect=False

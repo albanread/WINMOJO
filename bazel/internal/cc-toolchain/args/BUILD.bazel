@@ -16,6 +16,16 @@ cc_args(
     ],
     data = [
         "//bazel/internal/cc-toolchain/tools:resource_directory_filegroup",
+        # Anchor for the LLVM overlay's relative symlinks. The @llvm-project
+        # repo materialises as symlinks like `llvm -> ..\+llvm_source+llvm-raw\llvm`,
+        # and Windows resolves a relative symlink LEXICALLY against the path
+        # used to reach it. Actions reach the repo through
+        # execroot/_main/external/, so `..` must find +llvm_source+llvm-raw
+        # THERE -- but Bazel only plants a repo into that forest if one of its
+        # files is an action input. This one file is that input. Remove it and
+        # every freshly-keyed LLVM compile fails with "no such file or
+        # directory" on a source that visibly exists.
+        "@llvm-raw//:README.md",
     ],
     format = {
         "resource_dir": "//bazel/internal/cc-toolchain/tools:resource_directory_filegroup",

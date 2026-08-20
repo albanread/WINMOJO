@@ -417,6 +417,12 @@ __declspec(dllexport) void AsyncRT_DeviceBuffer_retain(const DragonBuffer *b) {
     if (b) const_cast<DragonBuffer *>(b)->rc.fetch_add(1);
 }
 
+/* The stdlib grew this accessor after the ABI spec was generated: copies
+ * route through the buffer's owning context. A borrow, not a retain. */
+__declspec(dllexport) DragonContext *AsyncRT_DeviceBuffer_context(const DragonBuffer *b) {
+    return b ? b->ctx : nullptr;
+}
+
 __declspec(dllexport) void AsyncRT_DeviceBuffer_release(const DragonBuffer *b) {
     if (!b) return;
     auto *x = const_cast<DragonBuffer *>(b);
@@ -448,6 +454,30 @@ __declspec(dllexport) const char *AsyncRT_DeviceContext_DtoD_async(
     const DragonContext *ctx, const DragonBuffer *dst, const DragonBuffer *src) {
     if (!ctx || !dst || !src) return errf("DtoD_async: null argument");
     size_t n = dst->bytes < src->bytes ? dst->bytes : src->bytes;
+
+    /* The stdlib evolved past the ABI spec here: every buffer-to-buffer copy
+     * -- including host<->device -- now arrives through this one entry point,
+     * and a host buffer carries hostPtr with mem null. Dispatch on shape
+     * rather than assuming two cl_mems, or the copy dies with
+     * CL_INVALID_MEM_OBJECT (-38). */
+    if (src->hostPtr && dst->hostPtr) {
+        memcpy(dst->hostPtr, src->hostPtr, n);
+        return nullptr;
+    }
+    if (src->hostPtr) {
+        cl_int e = clEnqueueWriteBuffer(ctx->defaultStream->q, dst->mem,
+                                        CL_FALSE, 0, n, src->hostPtr, 0,
+                                        nullptr, nullptr);
+        return e == CL_SUCCESS ? nullptr
+                               : errf("clEnqueueWriteBuffer failed: %d", e);
+    }
+    if (dst->hostPtr) {
+        cl_int e = clEnqueueReadBuffer(ctx->defaultStream->q, src->mem,
+                                       CL_FALSE, 0, n, dst->hostPtr, 0,
+                                       nullptr, nullptr);
+        return e == CL_SUCCESS ? nullptr
+                               : errf("clEnqueueReadBuffer failed: %d", e);
+    }
     cl_int e = clEnqueueCopyBuffer(ctx->defaultStream->q, src->mem, dst->mem, 0, 0, n,
                                    0, nullptr, nullptr);
     return e == CL_SUCCESS ? nullptr : errf("clEnqueueCopyBuffer failed: %d", e);
