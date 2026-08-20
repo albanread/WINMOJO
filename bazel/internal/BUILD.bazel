@@ -202,6 +202,7 @@ sh_binary(
 mojo_toolchain(
     name = "mojo_toolchain_target",
     implicit_deps = [],
+    winkb_db = "@winkb//:windows_api.db",
     lld = "@llvm-project//lld:lld",
     mojo = select({
         # nonsense just so it resolves. this should never actually run.

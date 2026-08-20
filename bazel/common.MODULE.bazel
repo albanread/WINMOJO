@@ -329,6 +329,18 @@ module_versions(
 compat = use_extension("@rules_cc//cc:extensions.bzl", "compatibility_proxy")
 use_repo(compat, "cc_compatibility_proxy")
 
+new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
+
+# The Win32 metadata database the compiler queries during elaboration
+# (`winkb_query`). Kept outside git because it is 86 MB of generated data;
+# releases ship it as lib/windows_api.db, which is the compiled-in default
+# path. A different machine points this one line at its own copy.
+new_local_repository(
+    name = "winkb",
+    build_file_content = 'exports_files(["windows_api.db"])',
+    path = "C:/projects/windows_api",
+)
+
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")

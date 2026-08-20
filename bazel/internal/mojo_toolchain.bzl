@@ -44,6 +44,15 @@ def _mojo_toolchain_impl(ctx):
         build_env["MODULAR_COMPILER_PLUGINS"] = ctx.file.compiler_plugin.path
         tool_files.append(depset([ctx.file.compiler_plugin]))
 
+    # The Win32 metadata database behind the `winkb_query` comptime intrinsic.
+    # Declared here so it is a tracked action input: its content participates
+    # in the cache key, and two machines with different metadata cannot
+    # silently produce identical-looking builds. Without this it would be a
+    # hidden input reached through a loose env var.
+    if ctx.file.winkb_db:
+        build_env["MODULAR_MOJO_MAX_WINKB_PATH"] = ctx.file.winkb_db.path
+        tool_files.append(depset([ctx.file.winkb_db]))
+
     # Let a plugin contribute extra build-action env (e.g. a plugin-specific SDK
     # lib path) so it reaches only mojo build actions, not a global --action_env
     # that would pollute every action's cache key.
@@ -102,6 +111,12 @@ mojo_toolchain = rule(
             allow_single_file = True,
             cfg = CFG_WORKAROUND,
             doc = "Optional compiler plugin (.so) to set via MODULAR_COMPILER_PLUGINS in build actions.",
+        ),
+        "winkb_db": attr.label(
+            mandatory = False,
+            allow_single_file = True,
+            cfg = CFG_WORKAROUND,
+            doc = "Optional Win32 metadata database, exported to build actions as MODULAR_MOJO_MAX_WINKB_PATH and tracked as an action input.",
         ),
         "driver_plugin": attr.label(
             mandatory = False,
