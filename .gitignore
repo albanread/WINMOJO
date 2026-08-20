@@ -169,3 +169,10 @@ docs/releases/nightly.md
 mojo/docs/releases/nightly.md
 
 .bazelignore
+
+# DragonMax: KGEN's Target/ directories are compiler source, not build output.
+# The bare `target/` rule above (meant for Rust build dirs) swallows them on
+# case-insensitive filesystems, which silently drops new backend files from
+# commits. Re-include them.
+!KGEN/**/Target/
+!KGEN/**/Target/**
