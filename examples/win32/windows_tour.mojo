@@ -187,7 +187,7 @@ def main() raises:
 
     var env = RegKey.open(HKEY_CURRENT_USER, "Environment")
     var names = env.values()
-    print("HKCU\\Environment has", len(names), "values:", commas(names))
+    print("env values   ", len(names), "->", commas(names))
 
     var processor = RegKey.open(
         HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\CentralProcessor"

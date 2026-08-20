@@ -129,11 +129,14 @@ Three gaps remain worked around rather than fixed:
 - **The compiler cannot target this machine's CPU.** `oryon-1` — the actual
   Snapdragon X core — hits an assertion in LLVM's AArch64 scheduling model
   (`TargetSchedule.cpp:227`, "incomplete machine model") and aborts codegen
-  outright. Everything below was compiled for `neoverse-n1` instead. Both are
-  ARMv8-A AArch64 and neither has SVE, so the substitution is sound and the code
-  is correct and native — but it is scheduled for a narrower core than the one
-  running it. A compiler that crashes on its own host CPU is a defect, not a
-  footnote, and it is the next thing to fix.
+  outright. The benchmarks below were compiled for `neoverse-n1` instead; both
+  are ARMv8-A AArch64 and neither has SVE, so the substitution is sound and the
+  code is correct and native — but it is scheduled for a narrower core than the
+  one running it. `neoverse-n1` is not a general escape either: it aborts the
+  same way on some load/store-pair sequences, so AOT builds of the Windows
+  examples use `--target-cpu generic`, which selects no scheduling model at all.
+  A compiler that crashes on its own host CPU is a defect, not a footnote, and
+  it is the next thing to fix.
 - **The compiler_rt default path is Linux-shaped**
   (`lib/libKGENCompilerRTShared.so`), so `MODULAR_MOJO_MAX_COMPILERRT_PATH` must
   be set for a standalone invocation. Bazel-driven builds resolve it via runfiles
@@ -239,6 +242,90 @@ provably neither -- with `adopt=` for pre-counted out-parameters and
 (process-lifetime DLL cache). The metadata plumbing is
 [std/sys/_winkb.mojo](mojo/stdlib/std/sys/_winkb.mojo); the compiler side is
 `winkb_query` in the KGEN elaborator.
+
+### A standard library for Windows
+
+![The std.windows tour, run on this machine](docs/images/windows_tour.png)
+
+Upstream Mojo does not support Windows, so it has no Windows library either:
+`os` and `pathlib` are written against POSIX, and the parts that cannot be
+emulated are simply absent. A POSIX shim in the compiler runtime covers the
+names Mojo itself calls. `std/windows/` is the other half — the things a
+Windows program actually wants.
+
+| Module | |
+| --- | --- |
+| `core` | `WideString` (UTF-8 ↔ UTF-16), decoded errors, owning `Handle` |
+| `registry` | `RegKey` open/create, typed get/set, subkey and value enumeration |
+| `shell` | `known_folder`, `expand_environment`, `message_box` |
+| `fs` | attributes, directory listing with metadata, path services, copy/move/delete, free space |
+| `sysinfo` | OS version, computer and user, memory, processors, uptime, performance counter |
+| `console` | UTF-8 code page, ANSI escape handling, window size, title |
+| `time` | FILETIME ↔ Unix, local calendar time, file timestamps |
+| `process` | `run`, `run_captured`, environment, argument quoting, `is_elevated` |
+| `clipboard` | get and set text |
+
+Two lines of that screenshot are the argument for the module existing at all.
+
+`desktop` is `C:\Users\alban\OneDrive\Desktop`. Any program that had built
+that path from `%USERPROFILE%\Desktop` — the obvious thing, and what a
+POSIX-shaped port does — would be wrong on this machine, and on every
+OneDrive-backed or domain-joined machine. `SHGetKnownFolderPath` is not a
+convenience over the environment variable; it is the only correct answer.
+
+`product` says **Windows 10 Home** on a Windows 11 box. `ProductName` in the
+registry has lied since Windows 11 shipped, which is why `windows_version()`
+goes to `RtlGetVersion` in ntdll and reports the build number — 26200 is 25H2,
+26100 is 24H2, and the marketing name is not load-bearing. `GetVersionExW`
+would have lied differently: it reports 6.2 to any process without a
+compatibility manifest.
+
+```mojo
+from std.windows import RegKey, HKEY_LOCAL_MACHINE, KnownFolder, known_folder
+
+def main() raises:
+    print(known_folder(KnownFolder.DOCUMENTS))
+
+    var cpu = RegKey.open(
+        HKEY_LOCAL_MACHINE,
+        "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+    )
+    print(cpu.get_string("ProcessorNameString"))
+```
+
+Every struct offset in it comes from the metadata at compile time, for the
+reason the section above gives: `WIN32_FIND_DATAW` is 592 bytes with
+`cFileName` at 44 on 64-bit, and the numbers most sample code shows are the
+32-bit ones. A wrong offset there does not fail — it reads a filename out of
+the middle of a timestamp.
+
+**Named constants come from the metadata too**, and that was not the original
+plan. Writing this library meant transcribing about thirty-five constants by
+hand — access masks, flag bits, error codes. Thirty-four were right.
+`STARTF_USESTDHANDLES` was written as 1; it is 0x100, and 1 is
+`STARTF_USESHOWWINDOW`. Nothing errored: `CreateProcessW` succeeded, the pipe
+was created, `run_captured` returned exit 0 and an empty string, and the
+child's output appeared on the *parent's* console. The metadata had the right
+value the whole time, so `winkb_constant["NAME"]()` now folds any named
+constant or flag member to a literal at compile time, and a typo is this,
+with the source line:
+
+```
+note: the Win32 metadata has no 'constant_value' for STARTF_USESTDHANDLE
+```
+
+The tour that produced the screenshot is
+[examples/win32/windows_tour.mojo](examples/win32/windows_tour.mojo); it runs
+every function in the package against the real machine and prints what the
+machine said, rather than asserting. The run continues past the crop with the
+console section (which proves ANSI colour and console sizing), file
+timestamps, a captured child process, and a clipboard round trip through
+`café über 🐉`.
+
+One gap, named honestly: the metadata stores 5,837 GUID-valued constants
+(`FOLDERID_*`, `CLSID_*`) **without their bytes**, so `KnownFolder`'s ids are
+still transcribed from `shlobj.h`. COM interface IIDs are fine — those come
+from a different column, which is populated.
 
 ### Building
 
@@ -407,6 +494,7 @@ codebase are not a packaging choice — they are undefined behaviour.
 | `mojo.exe` | Builds, links, parses and compiles Mojo on Windows ARM64. |
 | stdlib | Compiles to `std.mojoc` with warnings only — no source changes required. |
 | tests | 258 of 369 targets pass; 52 fail, 4 fail to build, 55 platform-skipped. |
+| Windows API | `std/windows/` — registry, shell folders, filesystem, console, system info, time, processes, clipboard — on metadata-derived layouts and constants. |
 | next | Drive down the failures, then performance against CPython. |
 
 > **Reading the tree yourself?** Start at `KGEN/tools/mojo/mojo.cpp` and follow a
