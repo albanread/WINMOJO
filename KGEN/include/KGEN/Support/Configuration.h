@@ -83,6 +83,11 @@ public:
   /// Return the path to the kgen-compiler-rt library.
   StringRef getCompilerRTPath();
 
+  /// Path to the Win32 metadata database the elaborator queries for
+  /// `winkb_query`. Empty if none is configured, in which case any comptime
+  /// Win32 lookup is a diagnostic rather than a silent wrong answer.
+  StringRef getWinKBPath();
+
   /// Return the path to the mgp-rt library.
   StringRef getMGPRTPath();
 

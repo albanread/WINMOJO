@@ -2380,6 +2380,7 @@ LogicalResult ParamOperatorAttr::verify(
   case POC::TargetHasFeature:
   case POC::TargetGetField:
   case POC::GetEnv:
+  case POC::WinKBQuery:
   case POC::GetSizeOf:
   case POC::GetAlignOf:
   case POC::Apply:
@@ -2541,6 +2542,19 @@ LogicalResult ParamOperatorAttr::verify(
     } else if (!::isa<IndexType, StringType>(type)) {
       return emitError() << "'get_env' must return index, i1, or string";
     }
+    break;
+  case POC::WinKBQuery:
+    // (query, argument...) -- the first operand names the query, the rest are
+    // its arguments. Two is enough for every query so far: a struct size takes
+    // one name, a field offset takes a struct and a field.
+    if (operands.size() < 2 || operands.size() > 3)
+      return emitError() << "'winkb_query' expects a query name and one or two "
+                            "arguments";
+    for (auto operand : operands)
+      if (!::isa<StringType>(operand.getType()))
+        return emitError() << "'winkb_query' operands must all be strings";
+    if (!::isa<IndexType, StringType>(type))
+      return emitError() << "'winkb_query' must return index or string";
     break;
   case POC::PtrBitcast:
     if (operands.size() != 1)
@@ -4364,6 +4378,9 @@ static TypedAttr getParamOperator(MLIRContext *ctx, POC opcode,
     break;
   case POC::ApplyResultSlot:
   case POC::GetEnv:
+  // Not foldable here: the answer comes from the metadata database during
+  // elaboration, so there is nothing to simplify at attribute level.
+  case POC::WinKBQuery:
   case POC::AttrToStr:
     result = {};
     break;
@@ -4419,7 +4436,8 @@ ErrorOr<Type> inferParamOperatorResultType(POC opcode,
   if (!llvm::is_contained({POC::Apply, POC::ApplyResultSlot, POC::DataToStr,
                            POC::TargetHasFeature, POC::TargetGetField,
                            POC::AcceleratorArch, POC::GetSizeOf,
-                           POC::GetAlignOf, POC::GetEnv, POC::VariadicPtrMap,
+                           POC::GetAlignOf, POC::GetEnv, POC::WinKBQuery,
+                           POC::VariadicPtrMap,
                            POC::VariadicPtrRemoveMap, POC::StringAddress},
                           opcode) &&
       !llvm::all_of(operandsIn.drop_front(), [&](auto op) {

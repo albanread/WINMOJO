@@ -1201,6 +1201,10 @@ modular_cc_library(
         ":ToolCommon.headers",
         "//AsyncRT:CompilerSupport",
         "//Cache",
+        # The Win32 metadata database behind `winkb_query`, read during
+        # elaboration. Opened lazily, so a build that asks nothing of it never
+        # touches the file.
+        "@sqlite3//:sqlite3",
         "@llvm-project//mlir:IndexDialect",
         "@llvm-project//mlir:NVVMDialect",
         "@llvm-project//mlir:ROCDLDialect",

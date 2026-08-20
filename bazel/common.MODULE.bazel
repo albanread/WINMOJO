@@ -22,6 +22,10 @@ bazel_dep(name = "rules_pkg", version = "1.0.1")
 bazel_dep(name = "rules_proto", version = "7.1.0")
 bazel_dep(name = "rules_pycross", version = "0.8.1")
 bazel_dep(name = "rules_python", version = "1.8.5")
+# The Win32 metadata database the compiler queries during elaboration, so
+# comptime code can ask what a Win32 struct actually looks like rather than
+# repeating it. Public domain, so it adds no licence obligation.
+bazel_dep(name = "sqlite3", version = "3.53.3")
 bazel_dep(name = "rules_shell", version = "0.6.1")
 bazel_dep(name = "tcmalloc", version = "0.0.0-20250927-12f2552")
 bazel_dep(name = "tomlplusplus", version = "3.4.0")

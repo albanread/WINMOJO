@@ -113,6 +113,12 @@ StringRef MojoConfig::getCompilerRTPath() {
                  "lib/libKGENCompilerRTShared" EXT);
 }
 
+StringRef MojoConfig::getWinKBPath() {
+  // Overridable as MODULAR_MOJO_MAX_WINKB_PATH, and defaulting inside the
+  // package so a normal install needs no configuration.
+  return getPath(STRINGIFY_MOJO_CONFIG(".winkb_path"), "lib/windows_api.db");
+}
+
 StringRef MojoConfig::getMGPRTPath() {
   return getPath(STRINGIFY_MOJO_CONFIG(".mgprt_path"), "lib/libMGPRT" EXT);
 }

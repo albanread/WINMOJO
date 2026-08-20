@@ -108,6 +108,14 @@ def KGEN_POCAttr : I32EnumAttr<"POC", "Parameter Operator Code", [
   I32EnumAttrCase<"RemS", 49, "rem_s">,
   I32EnumAttrCase<"RemU", 50, "rem_u">,
 
+  // Win32 metadata queries. Yes, this is exactly what the note below asks
+  // people to stop doing, and it is done knowingly: `get_env` above is the
+  // same shape -- a string in, a constant out, resolved from state outside the
+  // program -- so this follows an existing precedent rather than inventing a
+  // second mechanism for it. This fork is pinned and never upstreamed; if that
+  // changes, this belongs in an attribute of its own, as the note says.
+  I32EnumAttrCase<"WinKBQuery", 51, "winkb_query">,
+
   /// HELLO INTREPID COMPILER DEVELOPER!  Are you thinking about adding another
   /// POC opcode for something that isn't a trivial expression like add or sub?
   /// The list above ^^^ is massively out of control, these things are not

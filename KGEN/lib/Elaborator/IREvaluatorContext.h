@@ -219,6 +219,11 @@ protected:
   /// Evaluate an apply-like operator.
   FailureOr<TypedAttr> evaluateGetEnv(ParamOperatorAttr op);
 
+  /// Evaluate POC::WinKBQuery "winkb_query": look a fact up in the Win32
+  /// metadata database while elaborating, so comptime code can ask what a
+  /// Win32 type actually looks like instead of restating it.
+  FailureOr<TypedAttr> evaluateWinKBQuery(ParamOperatorAttr op);
+
   /// Evaluate POC::DataToStr "data_to_str" operator.
   FailureOr<TypedAttr> evaluateDataToStr(ParamOperatorAttr op, bool reset);
 

@@ -20,6 +20,7 @@
 #include "KGEN/POPDialect/POPAttrs.h"
 #include "KGEN/POPDialect/POPTypes.h"
 #include "KGEN/POPDialect/POPUtils.h"
+#include "KGEN/Support/Configuration.h"
 #include "KGEN/Support/NameMangling.h"
 #include "KGEN/TransformUtils/ManglingUtils.h"
 #include "Support/Compiler/DiagnosticHandler.h"
@@ -27,6 +28,10 @@
 #include "mlir/Support/DebugStringHelper.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/ScopeExit.h"
+
+#include "sqlite3.h"
+
+#include <mutex>
 
 using namespace M;
 using namespace KGEN;
@@ -830,6 +835,253 @@ FailureOr<TypedAttr> IREvaluatorContext::evaluateGetEnv(ParamOperatorAttr op) {
   }
 
   return result.get();
+}
+
+//===----------------------------------------------------------------------===//
+// Win32 metadata queries
+//===----------------------------------------------------------------------===//
+//
+// The Win32 API surface is 18,000 functions over 15,000 structs and 8,000 COM
+// interfaces, and all of it is already described precisely -- field offsets,
+// struct sizes, vtable order, interface IIDs -- in a metadata database. The
+// alternative to reading it here is generating megabytes of Mojo declarations
+// and keeping them in sync by hand, which is a second source of truth and
+// therefore a source of drift.
+//
+// Reading it during elaboration means a binding states one fact -- a name --
+// and the compiler supplies the rest. A struct whose declaration disagrees
+// with Windows fails to build instead of corrupting memory at the first call.
+//
+// The database is opened lazily and only if a query is actually evaluated, so
+// a build that uses no Win32 metadata never touches it.
+
+namespace {
+
+/// A lazily-opened, read-only handle on the Win32 metadata database, shared
+/// for the life of the process. Elaboration is concurrent, so the open is
+/// guarded; the queries themselves are reads against an immutable file.
+class WinKBDatabase {
+public:
+  /// Returns the shared instance, opening the database on first use.
+  static WinKBDatabase &get() {
+    static WinKBDatabase instance;
+    return instance;
+  }
+
+  /// Run one query. Returns the error text on failure so the caller can put it
+  /// in a diagnostic pointing at the source that asked.
+  llvm::Expected<int64_t> queryInt(StringRef query, ArrayRef<StringRef> args);
+
+  llvm::Expected<std::string> queryString(StringRef query,
+                                          ArrayRef<StringRef> args);
+
+private:
+  WinKBDatabase() = default;
+  llvm::Error openLocked();
+  llvm::Expected<sqlite3_stmt *> prepare(StringRef query,
+                                         ArrayRef<StringRef> args);
+
+  std::mutex mutex;
+  sqlite3 *db = nullptr;
+  bool attempted = false;
+  std::string openError;
+};
+
+/// The queries this exposes, by the name Mojo passes as the first operand.
+///
+/// Each is stated once here rather than assembled from fragments: a binding
+/// asks for "struct_size", not for SQL, so the schema stays an implementation
+/// detail of the compiler and a metadata layout change is a one-line fix here
+/// instead of a break in every caller.
+struct WinKBQueryDef {
+  StringRef name;
+  unsigned argCount;
+  StringRef sql;
+};
+
+constexpr StringRef kStructSizeSQL =
+    "SELECT size_bits / 8 FROM types WHERE type_name = ?1 AND kind = 'struct'";
+constexpr StringRef kStructAlignSQL =
+    "SELECT align_bits / 8 FROM types WHERE type_name = ?1 AND kind = 'struct'";
+constexpr StringRef kFieldOffsetSQL =
+    "SELECT f.byte_offset FROM struct_fields f "
+    "JOIN types t ON t.type_id = f.struct_type_id "
+    "WHERE t.type_name = ?1 AND f.field_name = ?2";
+constexpr StringRef kVtableIndexSQL =
+    "SELECT m.vtable_index FROM interface_methods m "
+    "JOIN types t ON t.type_id = m.interface_type_id "
+    "WHERE t.type_name = ?1 AND m.method_name = ?2";
+constexpr StringRef kInterfaceIIDSQL =
+    "SELECT iid FROM types WHERE type_name = ?1 AND iid IS NOT NULL";
+constexpr StringRef kFunctionDLLSQL =
+    "SELECT dll_name FROM functions WHERE function_name = ?1";
+
+const WinKBQueryDef kQueries[] = {
+    {"struct_size", 1, kStructSizeSQL},
+    {"struct_align", 1, kStructAlignSQL},
+    {"field_offset", 2, kFieldOffsetSQL},
+    {"vtable_index", 2, kVtableIndexSQL},
+    {"interface_iid", 1, kInterfaceIIDSQL},
+    {"function_dll", 1, kFunctionDLLSQL},
+};
+
+llvm::Error WinKBDatabase::openLocked() {
+  if (attempted)
+    return openError.empty() ? llvm::Error::success()
+                             : llvm::createStringError(llvm::inconvertibleErrorCode(),
+                                                       openError);
+  attempted = true;
+
+  ErrorOr<MojoConfig> configOr = MojoConfig::open();
+  if (configOr.isError()) {
+    openError = "cannot read the Mojo configuration to locate the Win32 "
+                "metadata database";
+    return llvm::createStringError(llvm::inconvertibleErrorCode(), openError);
+  }
+  // The config owns the string, so copy it before the config goes out of scope.
+  std::string path = configOr.get().getWinKBPath().str();
+  if (path.empty()) {
+    openError = "no Win32 metadata database is configured; set "
+                "MODULAR_MOJO_MAX_WINKB_PATH to windows_api.db";
+    return llvm::createStringError(llvm::inconvertibleErrorCode(), openError);
+  }
+
+  // Read-only, and never created: a missing database is a configuration error
+  // to report, not an empty one to invent and then answer wrongly from.
+  int rc = sqlite3_open_v2(path.c_str(), &db, SQLITE_OPEN_READONLY,
+                           nullptr);
+  if (rc != SQLITE_OK) {
+    openError = "cannot open the Win32 metadata database at '" + path +
+                "': " + std::string(db ? sqlite3_errmsg(db) : "out of memory");
+    if (db) {
+      sqlite3_close(db);
+      db = nullptr;
+    }
+    return llvm::createStringError(llvm::inconvertibleErrorCode(), openError);
+  }
+  return llvm::Error::success();
+}
+
+llvm::Expected<sqlite3_stmt *> WinKBDatabase::prepare(StringRef query,
+                                                      ArrayRef<StringRef> args) {
+  const WinKBQueryDef *def = nullptr;
+  for (const auto &candidate : kQueries)
+    if (candidate.name == query)
+      def = &candidate;
+
+  if (!def) {
+    std::string known;
+    for (const auto &candidate : kQueries)
+      known += (known.empty() ? "" : ", ") + candidate.name.str();
+    return llvm::createStringError(
+        llvm::inconvertibleErrorCode(),
+        "unknown Win32 metadata query '" + query.str() + "'; known queries: " +
+            known);
+  }
+
+  if (args.size() != def->argCount)
+    return llvm::createStringError(
+        llvm::inconvertibleErrorCode(),
+        "Win32 metadata query '" + query.str() + "' takes " +
+            std::to_string(def->argCount) + " argument(s), got " +
+            std::to_string(args.size()));
+
+  if (auto err = openLocked())
+    return std::move(err);
+
+  sqlite3_stmt *stmt = nullptr;
+  if (sqlite3_prepare_v2(db, def->sql.str().c_str(), -1, &stmt, nullptr) !=
+      SQLITE_OK)
+    return llvm::createStringError(llvm::inconvertibleErrorCode(),
+                                   StringRef(sqlite3_errmsg(db)));
+
+  for (auto [index, arg] : llvm::enumerate(args))
+    sqlite3_bind_text(stmt, static_cast<int>(index + 1), arg.data(),
+                      static_cast<int>(arg.size()), SQLITE_TRANSIENT);
+  return stmt;
+}
+
+llvm::Expected<int64_t> WinKBDatabase::queryInt(StringRef query,
+                                                ArrayRef<StringRef> args) {
+  std::lock_guard<std::mutex> lock(mutex);
+  auto stmt = prepare(query, args);
+  if (!stmt)
+    return stmt.takeError();
+  llvm::scope_exit cleanup([&] { sqlite3_finalize(*stmt); });
+
+  int rc = sqlite3_step(*stmt);
+  if (rc != SQLITE_ROW)
+    return llvm::createStringError(
+        llvm::inconvertibleErrorCode(),
+        "the Win32 metadata has no '" + query.str() + "' for " +
+            llvm::join(args, ", "));
+  // A NULL column means the metadata knows the entity but not this property,
+  // which is a different failure from not knowing the entity at all.
+  if (sqlite3_column_type(*stmt, 0) == SQLITE_NULL)
+    return llvm::createStringError(llvm::inconvertibleErrorCode(),
+                                   "the Win32 metadata records no " +
+                                       query.str() + " for " +
+                                       llvm::join(args, ", "));
+  return sqlite3_column_int64(*stmt, 0);
+}
+
+llvm::Expected<std::string>
+WinKBDatabase::queryString(StringRef query, ArrayRef<StringRef> args) {
+  std::lock_guard<std::mutex> lock(mutex);
+  auto stmt = prepare(query, args);
+  if (!stmt)
+    return stmt.takeError();
+  llvm::scope_exit cleanup([&] { sqlite3_finalize(*stmt); });
+
+  int rc = sqlite3_step(*stmt);
+  if (rc != SQLITE_ROW || sqlite3_column_type(*stmt, 0) == SQLITE_NULL)
+    return llvm::createStringError(
+        llvm::inconvertibleErrorCode(),
+        "the Win32 metadata has no '" + query.str() + "' for " +
+            llvm::join(args, ", "));
+
+  const auto *text = sqlite3_column_text(*stmt, 0);
+  return std::string(reinterpret_cast<const char *>(text),
+                     sqlite3_column_bytes(*stmt, 0));
+}
+
+} // namespace
+
+FailureOr<TypedAttr>
+IREvaluatorContext::evaluateWinKBQuery(ParamOperatorAttr op) {
+  SmallVector<StringRef> operands;
+  for (auto operand : op.getOperands()) {
+    auto str = dyn_cast<StringAttr>(operand);
+    if (!str) {
+      emitError({*errorLoc, "'winkb_query' operand did not narrow to a "
+                            "constant string"});
+      return failure();
+    }
+    operands.push_back(str.getValue());
+  }
+
+  StringRef query = operands.front();
+  ArrayRef<StringRef> args = ArrayRef<StringRef>(operands).drop_front();
+
+  auto &database = WinKBDatabase::get();
+
+  if (::isa<IndexType>(op.getType())) {
+    auto value = database.queryInt(query, args);
+    if (!value) {
+      emitError({*errorLoc, llvm::toString(value.takeError())});
+      return failure();
+    }
+    return cast<TypedAttr>(
+        IntegerAttr::get(IndexType::get(mlirCtx), *value));
+  }
+
+  auto value = database.queryString(query, args);
+  if (!value) {
+    emitError({*errorLoc, llvm::toString(value.takeError())});
+    return failure();
+  }
+  return cast<TypedAttr>(
+      StringAttr::get(*value, StringType::get(mlirCtx)));
 }
 
 // See if we can decode the first 'numBytes' of the memory blob into a
