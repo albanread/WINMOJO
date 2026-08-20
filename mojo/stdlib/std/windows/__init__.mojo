@@ -37,6 +37,7 @@ def main() raises:
 ```
 """
 
+from .clipboard import get_clipboard_text, set_clipboard_text
 from .console import (
     console_size,
     enable_virtual_terminal,
@@ -73,6 +74,17 @@ from .fs import (
     set_current_directory,
     temp_path,
 )
+from .process import (
+    build_command_line,
+    current_process_id,
+    environment,
+    get_environment,
+    is_elevated,
+    quote_argument,
+    run,
+    run_captured,
+    set_environment,
+)
 from .registry import (
     HKEY_CLASSES_ROOT,
     HKEY_CURRENT_CONFIG,
@@ -97,6 +109,14 @@ from .shell import (
     expand_environment,
     known_folder,
     message_box,
+)
+from .time import (
+    DateTime,
+    file_times,
+    filetime_to_unix_ns,
+    system_time_ns,
+    to_local_time,
+    unix_ns_to_filetime,
 )
 from .sysinfo import (
     MemoryStatus,

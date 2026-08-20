@@ -239,9 +239,19 @@ compile here. The runtime never sees the untaken branches.
 Queries answered by the compiler during elaboration, from the Win32 metadata
 database (std.sys._winkb): `winkb_struct_size`, `winkb_struct_align`,
 `winkb_field_offset`, `winkb_vtable_index`, `winkb_interface_iid`,
-`winkb_function_dll`, `winkb_db_hash`, `winkb_db_schema_version`. All fold
-to constants; a name the metadata does not know is a compile error naming
-the source line.
+`winkb_function_dll`, `winkb_constant`, `winkb_constant_text`,
+`winkb_db_hash`, `winkb_db_schema_version`. All fold to constants; a name the
+metadata does not know is a compile error naming the source line:
+
+> *note: the Win32 metadata has no 'constant_value' for STARTF_USESTDHANDLE*
+
+`winkb_constant` covers both plain `#define`-style constants and enumeration
+or flag members, and returns the *signed* reading — the one that stays
+correct in both directions, since `HKEY_LOCAL_MACHINE` must sign-extend to a
+pointer while a flag mask keeps its bits through the caller's `UInt32()`.
+Reach for it in preference to transcribing: `STARTF_USESTDHANDLES` is 0x100
+and `STARTF_USESHOWWINDOW` is 1, and swapping them sends a child's output to
+the console instead of the pipe with no error anywhere.
 
 COM (std.sys._com): `com_method` / `com_method_of` dispatch through
 metadata-derived vtable slots (four instructions, same as C++);

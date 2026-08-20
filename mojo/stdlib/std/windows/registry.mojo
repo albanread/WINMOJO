@@ -16,51 +16,52 @@
 from std.ffi import c_int
 from std.memory import Pointer
 from std.sys._win32 import Win32Module
+from std.sys._winkb import winkb_constant
 from std.windows.core import WideString, error_message, from_wide
 from std.windows.shell import expand_environment
 
 
-# The predefined roots, sign-extended (see the note above).
-comptime HKEY_CLASSES_ROOT = Int(-2147483648)
+# The predefined roots, from the metadata, which stores them signed --
+# see the note above about why that matters on 64-bit.
+comptime HKEY_CLASSES_ROOT = winkb_constant["HKEY_CLASSES_ROOT"]()
 """The `HKEY_CLASSES_ROOT` predefined key."""
-comptime HKEY_CURRENT_USER = Int(-2147483647)
+comptime HKEY_CURRENT_USER = winkb_constant["HKEY_CURRENT_USER"]()
 """The `HKEY_CURRENT_USER` predefined key."""
-comptime HKEY_LOCAL_MACHINE = Int(-2147483646)
+comptime HKEY_LOCAL_MACHINE = winkb_constant["HKEY_LOCAL_MACHINE"]()
 """The `HKEY_LOCAL_MACHINE` predefined key."""
-comptime HKEY_USERS = Int(-2147483645)
+comptime HKEY_USERS = winkb_constant["HKEY_USERS"]()
 """The `HKEY_USERS` predefined key."""
-comptime HKEY_CURRENT_CONFIG = Int(-2147483643)
+comptime HKEY_CURRENT_CONFIG = winkb_constant["HKEY_CURRENT_CONFIG"]()
 """The `HKEY_CURRENT_CONFIG` predefined key."""
 
 # Access masks. KEY_READ and KEY_WRITE are the header's composites with
 # SYNCHRONIZE masked off, which is what `RegOpenKeyExW` expects.
-comptime KEY_READ = UInt32(0x20019)
+comptime KEY_READ = UInt32(winkb_constant["KEY_READ"]())
 """Read access: query values, enumerate subkeys, and be notified."""
-comptime KEY_WRITE = UInt32(0x20006)
+comptime KEY_WRITE = UInt32(winkb_constant["KEY_WRITE"]())
 """Write access: set values and create subkeys."""
-comptime KEY_ALL_ACCESS = UInt32(0xF003F)
+comptime KEY_ALL_ACCESS = UInt32(winkb_constant["KEY_ALL_ACCESS"]())
 """Full access to a key."""
-comptime KEY_WOW64_64KEY = UInt32(0x0100)
+comptime KEY_WOW64_64KEY = UInt32(winkb_constant["KEY_WOW64_64KEY"]())
 """Forces the 64-bit view of the registry, whatever the process bitness."""
-comptime KEY_WOW64_32KEY = UInt32(0x0200)
+comptime KEY_WOW64_32KEY = UInt32(winkb_constant["KEY_WOW64_32KEY"]())
 """Forces the 32-bit (WOW6432Node) view of the registry."""
 
 # Value types.
-comptime REG_SZ = UInt32(1)
+comptime REG_SZ = UInt32(winkb_constant["REG_SZ"]())
 """A NUL-terminated UTF-16 string."""
-comptime REG_EXPAND_SZ = UInt32(2)
+comptime REG_EXPAND_SZ = UInt32(winkb_constant["REG_EXPAND_SZ"]())
 """A string with unexpanded environment references, e.g. `%PATH%`."""
-comptime REG_BINARY = UInt32(3)
+comptime REG_BINARY = UInt32(winkb_constant["REG_BINARY"]())
 """Raw bytes."""
-comptime REG_DWORD = UInt32(4)
+comptime REG_DWORD = UInt32(winkb_constant["REG_DWORD"]())
 """A 32-bit integer."""
-comptime REG_MULTI_SZ = UInt32(7)
+comptime REG_MULTI_SZ = UInt32(winkb_constant["REG_MULTI_SZ"]())
 """A sequence of strings, NUL-separated and NUL-NUL-terminated."""
-comptime REG_QWORD = UInt32(11)
+comptime REG_QWORD = UInt32(winkb_constant["REG_QWORD"]())
 """A 64-bit integer."""
 
-comptime _ERROR_MORE_DATA = 234
-comptime _ERROR_NO_MORE_ITEMS = 259
+comptime _ERROR_NO_MORE_ITEMS = winkb_constant["ERROR_NO_MORE_ITEMS"]()
 
 
 def _advapi32() raises -> Win32Module:
@@ -235,7 +236,7 @@ struct RegKey(Boolable, Movable):
                 name.unsafe_ptr(),
                 UInt32(0),
                 Int(0),  # lpClass
-                UInt32(0),  # REG_OPTION_NON_VOLATILE
+                UInt32(winkb_constant["REG_OPTION_NON_VOLATILE"]()),
                 access,
                 Int(0),  # default security
                 Pointer(to=result).unsafe_origin_cast[MutAnyOrigin](),

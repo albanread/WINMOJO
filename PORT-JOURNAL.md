@@ -1861,3 +1861,62 @@ Terminal and the launched process's `MainWindowHandle` is zero); declare
 entry point an ANSI string and finds nothing); and keep the RECT marshalling
 inside the C# helper (through PowerShell's `[ref]` it silently yields zeroes,
 and a 0x0 bitmap is the symptom).
+
+## One wrong number in thirty-five, and the compiler could have said so
+
+Writing the Windows library meant transcribing about thirty-five named
+constants — access masks, flag bits, error codes. Thirty-four were right.
+
+`STARTF_USESTDHANDLES` was written as 1. It is 0x100. One is
+`STARTF_USESHOWWINDOW`.
+
+The failure is instructive because of how it presented. `run_captured`
+returned exit code 0 and an empty string, and the child's output appeared —
+on the *parent's* console, above the line reporting that the child had said
+nothing. Nothing errored. `CreateProcessW` succeeded, the pipe was created,
+the read hit end-of-file immediately because nothing was ever written to it.
+Every individual call did what it was told. The only evidence was output in
+the wrong place.
+
+winkb had the right value the whole time, in `enum_members`:
+
+```
+STARTF_USESHOWWINDOW    1
+STARTF_USESTDHANDLES    256
+```
+
+So the metadata queries now cover constants. `constant_value` is one more row
+in the `kQueries` table in `IREvaluatorContext.cpp` — no new opcode, because
+`winkb_query` was already generic — reading `constants` and `enum_members` in
+one UNION, and `winkb_constant["NAME"]()` on the Mojo side folds it to a
+literal. `constant_text` does the same for the string-valued ones.
+
+Two details in that SQL are load-bearing.
+
+`COALESCE(value_i64, value_u64)` prefers the **signed** reading. It is the
+one that survives narrowing in both directions: `HKEY_LOCAL_MACHINE` must
+sign-extend to `0xFFFFFFFF80000002` when it is used as a pointer, while a
+flag mask like `0x80000000` keeps its bits through the caller's `UInt32()`
+either way. Preferring the unsigned reading breaks the first case silently —
+which is the same class of bug this is meant to end.
+
+`constants` wins over `enum_members` by ordinal where a name appears in both,
+because a `#define` is what a program written against the headers means.
+
+The whole windows package now goes through it. Every access mask, every
+`FILE_ATTRIBUTE_*`, every error code, `CP_UTF8`, `CF_UNICODETEXT`,
+`TokenElevation`, `ALL_PROCESSOR_GROUPS`, the FORMAT_MESSAGE flags, and the
+five predefined HKEY roots. The values are unchanged — the tour prints the
+same output before and after, which is the point — but a typo is now this,
+at compile time, with the source line:
+
+```
+note: the Win32 metadata has no 'constant_value' for STARTF_USESTDHANDLE
+```
+
+**What this does not cover.** GUIDs. `constants` has 5,837 rows of
+`value_kind = 'guid'` and stores none of their bytes, so `KnownFolder`'s ids
+are still transcribed from `shlobj.h`. Interface IIDs are fine — those come
+from `types.iid`, which is populated. Filling in the GUID constants is the
+single highest-value thing left to do to winkb itself; it would close the
+last category where this library is copying numbers out of a header.

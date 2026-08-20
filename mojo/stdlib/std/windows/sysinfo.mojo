@@ -20,7 +20,11 @@
 from std.ffi import c_int
 from std.memory import Pointer
 from std.sys._win32 import Win32Module
-from std.sys._winkb import winkb_field_offset, winkb_struct_size
+from std.sys._winkb import (
+    winkb_constant,
+    winkb_field_offset,
+    winkb_struct_size,
+)
 from std.windows.core import WideString, from_wide, raise_last_error
 
 
@@ -171,7 +175,9 @@ def processor_count() raises -> Int:
     """
     var count = Win32Module("kernel32.dll").function[
         def (UInt16) thin abi("C") -> UInt32
-    ]("GetActiveProcessorCount")(UInt16(0xFFFF))  # ALL_PROCESSOR_GROUPS
+    ]("GetActiveProcessorCount")(
+        UInt16(winkb_constant["ALL_PROCESSOR_GROUPS"]())
+    )
     if count == 0:
         raise_last_error("GetActiveProcessorCount")
     return Int(count)
@@ -192,12 +198,12 @@ def computer_name() raises -> String:
         ) thin abi("C") -> c_int
     ]("GetComputerNameExW")
 
-    # ComputerNameDnsHostname = 1. 256 is the documented ceiling.
+    # 256 is the documented ceiling for a DNS host name.
     var buffer = List[UInt16](length=256, fill=0)
     var size = UInt32(256)
     if (
         get_name(
-            c_int(1),
+            c_int(winkb_constant["ComputerNameDnsHostname"]()),
             buffer.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin](),
             Pointer(to=size).unsafe_origin_cast[MutAnyOrigin](),
         )

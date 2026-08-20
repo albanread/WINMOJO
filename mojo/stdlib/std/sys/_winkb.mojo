@@ -147,6 +147,66 @@ def winkb_interface_iid[type_name: StaticString]() -> StaticString:
     return StaticString(res)
 
 
+def winkb_constant[name: StaticString]() -> Int:
+    """The value of a named Win32 constant or flag, from the metadata.
+
+    Covers both plain constants and enumeration/flag members, so
+    `winkb_constant["STARTF_USESTDHANDLES"]()` and
+    `winkb_constant["ERROR_BROKEN_PIPE"]()` both answer. The value is the
+    signed reading, which is the one that stays correct in both directions:
+    `HKEY_LOCAL_MACHINE` must sign-extend to a pointer, and a flag mask keeps
+    its bits through the caller's `UInt32()`.
+
+    Hand-transcribing these is the quiet failure mode of Windows FFI --
+    `STARTF_USESTDHANDLES` is 0x100 and `STARTF_USESHOWWINDOW` is 1, and
+    swapping them redirects a child's output to the console instead of the
+    pipe with no error anywhere. A name the metadata does not know is a
+    compile error naming the source line.
+
+    Parameters:
+        name: The constant's name, e.g. "FILE_ATTRIBUTE_DIRECTORY".
+
+    Returns:
+        The constant's value.
+
+    Example:
+
+    ```mojo
+    from std.sys._winkb import winkb_constant
+
+    comptime CF_UNICODETEXT = UInt32(winkb_constant["CF_UNICODETEXT"]())
+    ```
+    """
+    return Int(
+        mlir_value=__mlir_attr[
+            `#kgen.param.expr<winkb_query, `,
+            _get_kgen_string["constant_value"](),
+            `, `,
+            _get_kgen_string[name](),
+            `> : index`,
+        ]
+    )
+
+
+def winkb_constant_text[name: StaticString]() -> StaticString:
+    """The value of a named Win32 string constant, from the metadata.
+
+    Parameters:
+        name: The constant's name, e.g. "SERVICES_ACTIVE_DATABASEW".
+
+    Returns:
+        The constant's text.
+    """
+    var res = __mlir_attr[
+        `#kgen.param.expr<winkb_query, `,
+        _get_kgen_string["constant_text"](),
+        `, `,
+        _get_kgen_string[name](),
+        `> : !kgen.string`,
+    ]
+    return StaticString(res)
+
+
 def winkb_db_hash() -> StaticString:
     """The SHA-256 of the metadata database this compilation is reading.
 

@@ -12,6 +12,7 @@
 # ===----------------------------------------------------------------------=== #
 
 from std.windows import (
+    DateTime,
     HKEY_CURRENT_USER,
     HKEY_LOCAL_MACHINE,
     KEY_READ,
@@ -21,9 +22,15 @@ from std.windows import (
     computer_name,
     console_size,
     current_directory,
+    current_process_id,
     disk_free_space,
     enable_virtual_terminal,
+    environment,
     expand_environment,
+    file_times,
+    get_clipboard_text,
+    get_environment,
+    is_elevated,
     known_folder,
     list_directory,
     memory_status,
@@ -31,12 +38,25 @@ from std.windows import (
     performance_counter,
     performance_frequency,
     processor_count,
+    quote_argument,
+    run_captured,
+    set_clipboard_text,
+    system_time_ns,
     temp_path,
+    to_local_time,
     uptime_ms,
     use_utf8_console,
     user_name,
     windows_version,
 )
+
+
+def count_char(text: StringSlice, needle: StringSlice) -> Int:
+    var n = 0
+    for byte in text.as_bytes():
+        if byte == needle.as_bytes()[0]:
+            n += 1
+    return n
 
 
 def pad(text: StringSlice, width: Int) -> String:
@@ -205,4 +225,40 @@ def main() raises:
         print("size          (redirected; no console)")
     print("colour       ", "\x1b[32mgreen\x1b[0m \x1b[33myellow\x1b[0m \x1b[31mred\x1b[0m")
     print("unicode      ", "café über 🐉 — em dash, ½ fraction, → arrow")
+
+    rule("time")
+    print("now (local)  ", to_local_time(system_time_ns()))
+    var times = file_times(module_path())
+    print("exe created  ", to_local_time(times[0]))
+    print("exe modified ", to_local_time(times[2]))
+    var newest = list_directory(current_directory())
+    var latest = 0
+    var latest_name = String("")
+    for entry in newest:
+        if entry.modified > latest:
+            latest = entry.modified
+            latest_name = entry.name.copy()
+    print("newest here  ", latest_name, "at", to_local_time(latest))
+
+    rule("process")
+    print("pid          ", current_process_id())
+    print("elevated     ", is_elevated())
+    print("PATH entries ", count_char(get_environment("PATH"), ";") + 1)
+    print("environment  ", len(environment()), "variables")
+    # The quoting is the part that is easy to get wrong: a Windows path ending
+    # in a backslash escapes the closing quote unless the run is doubled.
+    print("quoted       ", quote_argument("C:\\Program Files\\"))
+
+    var probe = run_captured(
+        [String("cmd.exe"), String("/c"), String("echo from a child process")]
+    )
+    print("child exit   ", probe[0])
+    print("child said   ", probe[1].strip())
+
+    rule("clipboard")
+    var before = get_clipboard_text()
+    set_clipboard_text("mojo on windows arm64 — café über 🐉")
+    print("wrote/read   ", get_clipboard_text())
+    set_clipboard_text(before)  # put back whatever was there
+    print("restored     ", before.byte_length(), "bytes")
     print()

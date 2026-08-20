@@ -15,7 +15,11 @@
 from std.ffi import c_int
 from std.memory import Pointer
 from std.sys._win32 import Win32Module
-from std.sys._winkb import winkb_field_offset, winkb_struct_size
+from std.sys._winkb import (
+    winkb_constant,
+    winkb_field_offset,
+    winkb_struct_size,
+)
 from std.windows.core import (
     Handle,
     WideString,
@@ -23,22 +27,35 @@ from std.windows.core import (
     last_error,
     raise_last_error,
 )
+from std.windows.time import _read_filetime, filetime_to_unix_ns
 
-comptime FILE_ATTRIBUTE_READONLY = UInt32(0x0001)
+comptime FILE_ATTRIBUTE_READONLY = UInt32(
+    winkb_constant["FILE_ATTRIBUTE_READONLY"]()
+)
 """The file cannot be written to or deleted."""
-comptime FILE_ATTRIBUTE_HIDDEN = UInt32(0x0002)
+comptime FILE_ATTRIBUTE_HIDDEN = UInt32(
+    winkb_constant["FILE_ATTRIBUTE_HIDDEN"]()
+)
 """The file is not shown in an ordinary directory listing."""
-comptime FILE_ATTRIBUTE_SYSTEM = UInt32(0x0004)
+comptime FILE_ATTRIBUTE_SYSTEM = UInt32(
+    winkb_constant["FILE_ATTRIBUTE_SYSTEM"]()
+)
 """The file belongs to the operating system."""
-comptime FILE_ATTRIBUTE_DIRECTORY = UInt32(0x0010)
+comptime FILE_ATTRIBUTE_DIRECTORY = UInt32(
+    winkb_constant["FILE_ATTRIBUTE_DIRECTORY"]()
+)
 """The entry is a directory."""
-comptime FILE_ATTRIBUTE_ARCHIVE = UInt32(0x0020)
+comptime FILE_ATTRIBUTE_ARCHIVE = UInt32(
+    winkb_constant["FILE_ATTRIBUTE_ARCHIVE"]()
+)
 """The file has changed since it was last backed up."""
-comptime FILE_ATTRIBUTE_REPARSE_POINT = UInt32(0x0400)
+comptime FILE_ATTRIBUTE_REPARSE_POINT = UInt32(
+    winkb_constant["FILE_ATTRIBUTE_REPARSE_POINT"]()
+)
 """The entry is a symlink, junction, or other reparse point."""
 
 comptime _INVALID_FILE_ATTRIBUTES = UInt32(0xFFFFFFFF)
-comptime _ERROR_NO_MORE_FILES = 18
+comptime _ERROR_NO_MORE_FILES = winkb_constant["ERROR_NO_MORE_FILES"]()
 
 
 @fieldwise_init
@@ -46,9 +63,9 @@ struct DirEntry(Copyable, Movable):
     """One entry from a directory listing, with the metadata the walk already
     had to read.
 
-    `FindNextFileW` returns attributes and size along with the name, so a
-    listing that also reports them costs nothing; asking POSIX-style, with a
-    stat per name, costs one syscall per file.
+    `FindNextFileW` returns attributes, size and timestamps along with the
+    name, so a listing that also reports them costs nothing; asking
+    POSIX-style, with a stat per name, costs one syscall per file.
     """
 
     var name: String
@@ -57,6 +74,10 @@ struct DirEntry(Copyable, Movable):
     """The `FILE_ATTRIBUTE_*` bits."""
     var size: Int
     """The file's size in bytes; meaningless for directories."""
+    var modified: Int
+    """Last write time, in Unix nanoseconds; zero if not recorded."""
+    var created: Int
+    """Creation time, in Unix nanoseconds; zero if not recorded."""
 
     def is_directory(self) -> Bool:
         """Whether this entry is a directory.
@@ -156,6 +177,8 @@ def list_directory(path: StringSlice) raises -> List[DirEntry]:
     comptime SIZE_HIGH_AT = winkb_field_offset["WIN32_FIND_DATAW", "nFileSizeHigh"]()
     comptime SIZE_LOW_AT = winkb_field_offset["WIN32_FIND_DATAW", "nFileSizeLow"]()
     comptime NAME_AT = winkb_field_offset["WIN32_FIND_DATAW", "cFileName"]()
+    comptime CREATED_AT = winkb_field_offset["WIN32_FIND_DATAW", "ftCreationTime"]()
+    comptime WRITTEN_AT = winkb_field_offset["WIN32_FIND_DATAW", "ftLastWriteTime"]()
     comptime FIND_BYTES = winkb_struct_size["WIN32_FIND_DATAW"]()
 
     var kernel32 = Win32Module("kernel32.dll")
@@ -194,6 +217,8 @@ def list_directory(path: StringSlice) raises -> List[DirEntry]:
                     name^,
                     base.unsafe_offset(ATTRS_AT).unsafe_bitcast[UInt32]()[],
                     (high << 32) | low,
+                    filetime_to_unix_ns(_read_filetime(base, WRITTEN_AT)),
+                    filetime_to_unix_ns(_read_filetime(base, CREATED_AT)),
                 )
             )
         if find_next(search, base) == 0:
@@ -448,9 +473,10 @@ def move_file(source: StringSlice, dest: StringSlice, overwrite: Bool = True) ra
     """
     var from_wide_path = WideString(source)
     var to_wide_path = WideString(dest)
-    # MOVEFILE_COPY_ALLOWED (2) is what lets this cross volumes at all;
-    # MOVEFILE_REPLACE_EXISTING is 1.
-    var flags = UInt32(2) | (UInt32(1) if overwrite else UInt32(0))
+    # MOVEFILE_COPY_ALLOWED is what lets this cross volumes at all.
+    comptime COPY_ALLOWED = UInt32(winkb_constant["MOVEFILE_COPY_ALLOWED"]())
+    comptime REPLACE = UInt32(winkb_constant["MOVEFILE_REPLACE_EXISTING"]())
+    var flags = COPY_ALLOWED | (REPLACE if overwrite else UInt32(0))
     if (
         Win32Module("kernel32.dll").function[
             def (

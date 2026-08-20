@@ -19,11 +19,18 @@
 from std.ffi import c_int
 from std.memory import Pointer
 from std.sys._win32 import Win32Module
-from std.sys._winkb import winkb_field_offset, winkb_struct_size
+from std.sys._winkb import (
+    winkb_constant,
+    winkb_field_offset,
+    winkb_struct_size,
+)
 from std.windows.core import WideString, raise_last_error
 
-comptime _STD_OUTPUT_HANDLE = c_int(-11)
-comptime _ENABLE_VIRTUAL_TERMINAL_PROCESSING = UInt32(0x0004)
+comptime _STD_OUTPUT_HANDLE = c_int(winkb_constant["STD_OUTPUT_HANDLE"]())
+comptime _ENABLE_VIRTUAL_TERMINAL_PROCESSING = UInt32(
+    winkb_constant["ENABLE_VIRTUAL_TERMINAL_PROCESSING"]()
+)
+comptime _CP_UTF8 = UInt32(winkb_constant["CP_UTF8"]())
 
 
 def _std_output() raises -> Int:
@@ -70,11 +77,11 @@ def use_utf8_console() raises:
     var set_input_cp = kernel32.function[
         def (UInt32) thin abi("C") -> c_int
     ]("SetConsoleCP")
-    if set_output_cp(UInt32(65001)) == 0:
+    if set_output_cp(_CP_UTF8) == 0:
         raise_last_error("SetConsoleOutputCP")
     # Input is best-effort: a redirected stdin has no code page and the
     # failure is not one the caller can do anything about.
-    _ = set_input_cp(UInt32(65001))
+    _ = set_input_cp(_CP_UTF8)
 
 
 def enable_virtual_terminal() raises:

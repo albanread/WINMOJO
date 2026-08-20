@@ -14,6 +14,7 @@
 from std.ffi import c_int
 from std.memory import Pointer, OpaquePointer
 from std.sys._win32 import Win32Module
+from std.sys._winkb import winkb_constant
 
 
 # ===----------------------------------------------------------------------=== #
@@ -63,12 +64,12 @@ struct WideString(Copyable, Movable, Sized):
             self._units.append(0)
             return
 
-        # CP_UTF8 = 65001, MB_ERR_INVALID_CHARS = 8: refuse malformed input
-        # rather than silently substituting replacement characters.
+        # MB_ERR_INVALID_CHARS: refuse malformed input rather than
+        # silently substituting replacement characters.
         var src = bytes.unsafe_ptr().as_imm().unsafe_origin_cast[ImmutAnyOrigin]()
         var needed = to_wide(
-            UInt32(65001),
-            UInt32(8),
+            UInt32(winkb_constant["CP_UTF8"]()),
+            UInt32(winkb_constant["MB_ERR_INVALID_CHARS"]()),
             src,
             c_int(n),
             Pointer[UInt16, MutAnyOrigin](unsafe_from_address=1),
@@ -79,8 +80,8 @@ struct WideString(Copyable, Movable, Sized):
 
         self._units = List[UInt16](length=Int(needed) + 1, fill=0)
         var written = to_wide(
-            UInt32(65001),
-            UInt32(8),
+            UInt32(winkb_constant["CP_UTF8"]()),
+            UInt32(winkb_constant["MB_ERR_INVALID_CHARS"]()),
             src,
             c_int(n),
             self._units.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin](),
@@ -153,7 +154,7 @@ def from_wide(units: Pointer[UInt16, MutAnyOrigin], count: Int = -1) raises -> S
     ]("WideCharToMultiByte")
 
     var needed = to_utf8(
-        UInt32(65001),
+        UInt32(winkb_constant["CP_UTF8"]()),
         UInt32(0),
         units,
         c_int(count),
@@ -167,7 +168,7 @@ def from_wide(units: Pointer[UInt16, MutAnyOrigin], count: Int = -1) raises -> S
 
     var bytes = List[UInt8](length=Int(needed), fill=0)
     var written = to_utf8(
-        UInt32(65001),
+        UInt32(winkb_constant["CP_UTF8"]()),
         UInt32(0),
         units,
         c_int(count),
@@ -231,9 +232,13 @@ def error_message(code: UInt32) -> String:
 
         # FROM_SYSTEM | IGNORE_INSERTS: the message is Windows' own and takes
         # no arguments from us, which is also what makes it safe to format.
+        comptime FLAGS = UInt32(
+            winkb_constant["FORMAT_MESSAGE_FROM_SYSTEM"]()
+            | winkb_constant["FORMAT_MESSAGE_IGNORE_INSERTS"]()
+        )
         var buffer = List[UInt16](length=512, fill=0)
         var n = format_message(
-            UInt32(0x1000 | 0x200),
+            FLAGS,
             Int(0),
             code,
             UInt32(0),

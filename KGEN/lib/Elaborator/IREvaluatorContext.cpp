@@ -922,6 +922,28 @@ constexpr StringRef kInterfaceIIDSQL =
 constexpr StringRef kFunctionDLLSQL =
     "SELECT dll_name FROM functions WHERE function_name = ?1";
 
+// Named constants come from two tables. Plain #define-style values live in
+// `constants`; flag and enumeration members live in `enum_members`, and the
+// two namespaces overlap only rarely, so `constants` wins by ordinal.
+//
+// COALESCE(value_i64, value_u64) prefers the SIGNED reading, which is the one
+// that survives narrowing in both directions: HKEY_LOCAL_MACHINE has to
+// sign-extend to 0xFFFFFFFF80000002 as a pointer, while a flag mask such as
+// 0x80000000 is narrowed by the caller's UInt32() and keeps its bits either
+// way. Preferring the unsigned reading would break the first case silently.
+constexpr StringRef kConstantValueSQL =
+    "SELECT value FROM ("
+    "  SELECT COALESCE(value_i64, value_u64) AS value, 0 AS rank"
+    "    FROM constants WHERE constant_name = ?1"
+    "     AND value_kind IN ('int', 'uint')"
+    "  UNION ALL"
+    "  SELECT COALESCE(value_i64, value_u64) AS value, 1 AS rank"
+    "    FROM enum_members WHERE member_name = ?1"
+    ") WHERE value IS NOT NULL ORDER BY rank LIMIT 1";
+constexpr StringRef kConstantTextSQL =
+    "SELECT value_text FROM constants "
+    "WHERE constant_name = ?1 AND value_kind = 'string'";
+
 constexpr StringRef kSchemaVersionSQL =
     "SELECT value FROM schema_meta WHERE key = 'schema_version'";
 
@@ -933,6 +955,8 @@ const WinKBQueryDef kQueries[] = {
     {"vtable_index", 2, kVtableIndexSQL},
     {"interface_iid", 1, kInterfaceIIDSQL},
     {"function_dll", 1, kFunctionDLLSQL},
+    {"constant_value", 1, kConstantValueSQL},
+    {"constant_text", 1, kConstantTextSQL},
 };
 
 llvm::Error WinKBDatabase::openLocked() {
