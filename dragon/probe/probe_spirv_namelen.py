@@ -252,23 +252,16 @@ def main() -> int:
         cl.clReleaseProgram(c_void_p(prog))
 
     print()
-    print("Every hand-built shape is callable, including the real kernel's
-"
-          "signature at 444 characters. Name length, BuiltIn globals and
-"
-          "argument shape are therefore all exonerated -- the Mojo module
-"
-          "differs some other way: OpenCL.std ExtInstImport, the Int8
-"
-          "capability, ContractionOff, FuncParamAttr decorations, or the
-"
-          "Constant-decorated WorkgroupSize builtin.")
+    print("Every hand-built shape is callable, including the real kernel")
+    print("signature at 444 characters. Name length, BuiltIn globals and")
+    print("argument shape are therefore all exonerated -- the Mojo module")
+    print("differs some other way: OpenCL.std ExtInstImport, the Int8")
+    print("capability, ContractionOff, FuncParamAttr decorations, or the")
+    print("Constant-decorated WorkgroupSize builtin.")
     print()
-    print("Also load-bearing: CL_PROGRAM_NUM_KERNELS reads 0 for kernels
-"
-          "that clCreateKernel then creates successfully. On this platform
-"
-          "it is not a liveness check, and any diagnostic built on it lies.")
+    print("Also load-bearing: CL_PROGRAM_NUM_KERNELS reads 0 for kernels")
+    print("that clCreateKernel then creates successfully. On this platform")
+    print("it is not a liveness check, and a diagnostic built on it lies.")
     return 0
 
 
