@@ -217,7 +217,7 @@ public:
   //===--------------------------------------------------------------------===//
 
   /// Get the base object linking layer.
-  llvm::orc::ObjectLinkingLayer &getLinkingLayer() { return *objectLayer; }
+  llvm::orc::ObjectLayer &getLinkingLayer() { return *objectLayer; }
   const llvm::DataLayout &getDataLayout() const { return dataLayout; }
 
   /// Add a JITDylib to the search order for symbol resolution. Asserts if the
@@ -273,8 +273,11 @@ private:
   /// DylibManager for managing dynamic libraries in the target process.
   std::unique_ptr<llvm::orc::DylibManager> dylibMgr = nullptr;
 
-  /// JITLink linker. This is what drives all the linking underneath our JIT.
-  std::unique_ptr<llvm::orc::ObjectLinkingLayer> objectLayer = nullptr;
+  /// The object linking layer that drives all linking underneath our JIT.
+  /// JITLink (ObjectLinkingLayer) everywhere it has a backend; RuntimeDyld
+  /// (RTDyldObjectLinkingLayer) on COFF/AArch64, where JITLink has none but
+  /// RuntimeDyld has shipped one since 2019.
+  std::unique_ptr<llvm::orc::ObjectLayer> objectLayer = nullptr;
 
   /// Protects the addition to all the layers in 'layers' when called via
   /// the thread-safe addIfAbsent.

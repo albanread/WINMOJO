@@ -1920,3 +1920,60 @@ are still transcribed from `shlobj.h`. Interface IIDs are fine — those come
 from `types.iid`, which is populated. Filling in the GUID constants is the
 single highest-value thing left to do to winkb itself; it would close the
 last category where this library is copying numbers out of a header.
+
+## "LLVM cannot JIT on Windows ARM64" was false, and the user called it
+
+The README said `mojo run` **cannot work** because "LLVM has no COFF/ARM64
+JITLink backend". The user, who JITs ARM64 code on this machine daily,
+refused to believe it. They were right to.
+
+The claim confused a layer with the library. LLVM has two JIT linkers:
+JITLink (new, `ObjectLinkingLayer`) genuinely has no COFF/aarch64 backend —
+`lib/ExecutionEngine/JITLink/` holds `COFF_x86_64.cpp` and nothing else for
+COFF. But RuntimeDyld (old, `RTDyldObjectLinkingLayer`) has shipped
+`RuntimeDyldCOFFAArch64.h` since 2019. Mojo's `ExecutionEngine` hard-coded
+the JITLink layer, so every ARM64 COFF object died at the last step with
+*"Unsupported target machine architecture in COFF object : ARM64"* — after
+codegen had already produced a perfectly good object.
+
+The fix is a fork in `ExecutionEngine::create`: on COFF+AArch64 the engine
+builds an `RTDyldObjectLinkingLayer` over `SectionMemoryManager` instead.
+Three details were load-bearing:
+
+- **The COMDAT flags.** COFF objects are full of COMDATs — every float
+  constant the compiler materialises is one (the `__xmm@...` symbols in the
+  error output). `setOverrideObjectFlagsWithResponsibilityFlags(true)` and
+  `setAutoClaimResponsibilityForObjectSymbols(true)`, the same pair LLJIT
+  sets for COFF targets, or materialisation dies on responsibility
+  mismatches.
+- **The CRT names an AOT link gets from import libraries.** First run after
+  the swap: `Symbols not found: [ write, memcpy, fflush, fdopen, fclose,
+  dup, __chkstk ]` — the JIT-side version of the day-one `oldnames.lib`
+  find. A `Win32CRTSymbolGenerator` resolves them live: plain CRT names by
+  `GetProcAddress` over every loaded module (ucrtbase.dll is loaded but the
+  process-symbol generator does not search it), POSIX spellings by the
+  oldnames rule applied at run time (`write` → `_write`), and `__chkstk` —
+  which is statically linked and exported by nothing — to this binary's own
+  copy, dragged in by an `extern "C"` reference.
+- **Which dylib the generator lives on.** First placement was the platform
+  stdlib, and nothing changed: materialisation searches the *link order* of
+  the exec dylib — exec → `$compilerrt-lib` → `$mlirc-lib` — and the
+  platform stdlib is not in it. The generator belongs on the CompilerRT
+  dylib, which `addToSearchOrder` wires into every user dylib.
+
+Proof, both sizes. Hello-world prints. Then the stress program: `List`,
+`Dict`, unicode strings, recursion, Float64 math, `raises` unwinding across
+JIT-compiled frames, and the whole `std.windows` surface — `RtlGetVersion`,
+`SHGetKnownFolderPath` through the DLL module cache — all inside `mojo run`.
+
+The REPL is a different story and stays blocked: it is an LLDB front end
+("unable to resolve the lldb path"), and lldb is not ported. That was never
+a JIT limitation; the README conflated the two, and now does not.
+
+One census note while verifying: the abort-class test failures
+(`test_string_span_bounds_abort` etc.) are NOT JIT failures — the harness
+dies importing `_multiprocessing.pyd` with "The filename or extension is
+too long" before lit starts. That is the parked MAX_PATH problem wearing a
+test-failure costume, and it means the census's failure count mixes
+path-length casualties with real ones. The rerun, when it happens, needs
+the short output base first.

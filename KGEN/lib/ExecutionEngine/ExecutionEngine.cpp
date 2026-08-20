@@ -25,6 +25,8 @@
 #include "llvm/ExecutionEngine/Orc/EPCDynamicLibrarySearchGenerator.h"
 #include "llvm/ExecutionEngine/Orc/MapperJITLinkMemoryManager.h"
 #include "llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h"
+#include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
+#include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/ExecutionEngine/Orc/SelfExecutorProcessControl.h"
 #include "llvm/ExecutionEngine/Orc/TargetProcess/JITLoaderPerf.h"
 #include "llvm/IR/Mangler.h"
@@ -69,6 +71,75 @@ static ErrorOrSuccess setupPlatform(llvm::orc::JITDylib &platformStdlib,
   return success();
 }
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <psapi.h>
+
+extern "C" void __chkstk();
+
+namespace {
+/// Resolves the symbols an AOT link gets from the CRT import libraries, which
+/// the JIT has no other way to see.
+///
+/// Three kinds of name land here. Plain CRT functions (`memcpy`, `fflush`)
+/// are exports of a loaded module -- ucrtbase.dll -- but the process-symbol
+/// generator does not search every loaded module. POSIX spellings (`write`,
+/// `dup`) are not exports at all: `oldnames.lib` aliases them to `_write` and
+/// `_dup` at LINK time, so at run time only the underscored name exists --
+/// this generator applies the same rule live. And `__chkstk` is linked
+/// statically from the CRT into every MSVC-target binary and exported by
+/// nothing; the compiler emits calls to it for any frame over a page, so it
+/// is resolved to this binary's own copy, dragged in by the extern above.
+class Win32CRTSymbolGenerator : public llvm::orc::DefinitionGenerator {
+public:
+  llvm::Error tryToGenerate(llvm::orc::LookupState &,
+                            llvm::orc::LookupKind,
+                            llvm::orc::JITDylib &jd,
+                            llvm::orc::JITDylibLookupFlags,
+                            const llvm::orc::SymbolLookupSet &names) override {
+    llvm::orc::SymbolMap found;
+    for (const auto &[name, flags] : names) {
+      llvm::StringRef bare = *name;
+      void *address = nullptr;
+      if (bare == "__chkstk") {
+        address = reinterpret_cast<void *>(&__chkstk);
+      } else {
+        address = findInLoadedModules(bare.str());
+        if (!address && !bare.starts_with("_"))
+          address = findInLoadedModules(("_" + bare).str());
+      }
+      if (address)
+        found[name] = {llvm::orc::ExecutorAddr::fromPtr(address),
+                       llvm::JITSymbolFlags::Exported |
+                           llvm::JITSymbolFlags::Callable};
+    }
+    if (found.empty())
+      return llvm::Error::success();
+    return jd.define(llvm::orc::absoluteSymbols(std::move(found)));
+  }
+
+private:
+  /// GetProcAddress over every module in the process, the way the dynamic
+  /// linker would have resolved an import.
+  static void *findInLoadedModules(const std::string &name) {
+    HMODULE modules[1024];
+    DWORD needed = 0;
+    if (!K32EnumProcessModules(GetCurrentProcess(), modules, sizeof(modules),
+                               &needed))
+      return nullptr;
+    size_t count = std::min<size_t>(needed / sizeof(HMODULE),
+                                    std::size(modules));
+    for (size_t i = 0; i < count; ++i)
+      if (void *address = reinterpret_cast<void *>(
+              GetProcAddress(modules[i], name.c_str())))
+        return address;
+    return nullptr;
+  }
+};
+} // namespace
+#endif
+
 /// Initialize the mlirc and CompilerRT dylib.
 static ErrorOrSuccess
 initializeCompilerRT(llvm::orc::ExecutionSession &session,
@@ -112,6 +183,15 @@ initializeCompilerRT(llvm::orc::ExecutionSession &session,
     libJD->addGenerator(std::move(*generatorOr));
   }
 
+#ifdef _WIN32
+  // The names an AOT link resolves from the CRT import libraries -- POSIX
+  // aliases, ucrtbase exports, __chkstk. This dylib (unlike the platform
+  // stdlib) is in the LINK order of every user dylib, which is the search
+  // path a materialization failure actually consults.
+  if (!options.crossCompiling)
+    libJD->addGenerator(std::make_unique<Win32CRTSymbolGenerator>());
+#endif
+
   // Allow pulling in sanitizer methods from the current process, as we
   // currently can't activate any of these runtimes otherwise (they must
   // generally be loaded first in the host process).
@@ -140,24 +220,14 @@ ExecutionEngine::create(ExecutionEngineOptions options,
   std::unique_ptr<llvm::orc::ExecutorProcessControl> epc =
       std::move(options.epc);
 
-  // The JIT-link memory manager is owned by the ObjectLinkingLayer so build it
-  // up front.
-  //
-  // JIT mapper reservation granularity. Every fresh reservation by LLVM's
-  // MapperJITLinkMemoryManager is rounded up to this size and mmapped
-  // PROT_READ|PROT_WRITE, so it sets a floor on the JIT region's virtual
-  // footprint — which counts against RLIMIT_AS on Linux. Large compiles
-  // still work: the mapper reserves additional slabs on demand.
-  //
-  // Do not increase this unless you know what you are doing. In the past,
-  // setting this to 1 GiB caused sporadic OoM crashes on memory-constrained
-  // runners.
-  size_t slabSize = size_t{64} * 1024 * 1024;
-  auto managerOr =
-      toModularErrorOr(llvm::orc::MapperJITLinkMemoryManager::CreateWithMapper<
-                       llvm::orc::InProcessMemoryMapper>(slabSize));
-  if (managerOr.isError())
-    return managerOr.takeError();
+  // JITLink has no COFF/AArch64 backend, so ObjectLinkingLayer rejects every
+  // object on Windows ARM64 with "Unsupported target machine architecture in
+  // COFF object : ARM64" -- after codegen has already produced a perfectly
+  // good object. RuntimeDyld has shipped RuntimeDyldCOFFAArch64 since 2019,
+  // so on that one configuration the JIT runs on the older linking layer
+  // instead. Everything above the layer (generators, StaticArchiveLayer,
+  // materialization) is written against ObjectLayer and does not care.
+  bool useRuntimeDyld = tt.isOSBinFormatCOFF() && tt.isAArch64();
 
   if (!epc) {
     auto pageSize = toModularErrorOr(llvm::sys::Process::getPageSize());
@@ -188,9 +258,46 @@ ExecutionEngine::create(ExecutionEngineOptions options,
     return cfgOr.takeError();
   MojoConfig cfg = std::move(*cfgOr);
 
-  // Construct the object linking layer; it takes ownership of the manager.
-  ee->objectLayer = std::make_unique<llvm::orc::ObjectLinkingLayer>(
-      *ee->executionSession, std::move(*managerOr));
+  // Construct the object linking layer. Plugins are a JITLink-only concept,
+  // so the JITLink layer is also kept as a typed pointer for the plugin
+  // registration below; it stays null on the RuntimeDyld path.
+  llvm::orc::ObjectLinkingLayer *jitLinkLayer = nullptr;
+  if (useRuntimeDyld) {
+    auto layer = std::make_unique<llvm::orc::RTDyldObjectLinkingLayer>(
+        *ee->executionSession, [](const llvm::MemoryBuffer &) {
+          return std::make_unique<llvm::SectionMemoryManager>();
+        });
+    // COFF objects are full of COMDATs (every float constant the compiler
+    // materializes is one -- the `__xmm@...` symbols), and their linkage
+    // does not survive the responsibility handoff without these two flags.
+    // LLJIT sets exactly this pair for COFF targets.
+    layer->setOverrideObjectFlagsWithResponsibilityFlags(true);
+    layer->setAutoClaimResponsibilityForObjectSymbols(true);
+    ee->objectLayer = std::move(layer);
+  } else {
+    // The JIT-link memory manager is owned by the ObjectLinkingLayer so
+    // build it here.
+    //
+    // JIT mapper reservation granularity. Every fresh reservation by LLVM's
+    // MapperJITLinkMemoryManager is rounded up to this size and mmapped
+    // PROT_READ|PROT_WRITE, so it sets a floor on the JIT region's virtual
+    // footprint — which counts against RLIMIT_AS on Linux. Large compiles
+    // still work: the mapper reserves additional slabs on demand.
+    //
+    // Do not increase this unless you know what you are doing. In the past,
+    // setting this to 1 GiB caused sporadic OoM crashes on
+    // memory-constrained runners.
+    size_t slabSize = size_t{64} * 1024 * 1024;
+    auto managerOr = toModularErrorOr(
+        llvm::orc::MapperJITLinkMemoryManager::CreateWithMapper<
+            llvm::orc::InProcessMemoryMapper>(slabSize));
+    if (managerOr.isError())
+      return managerOr.takeError();
+    auto layer = std::make_unique<llvm::orc::ObjectLinkingLayer>(
+        *ee->executionSession, std::move(*managerOr));
+    jitLinkLayer = layer.get();
+    ee->objectLayer = std::move(layer);
+  }
 
   // Construct the platform stdlib - this way we don't have to worry about
   // whether or not we have it later on.
@@ -206,7 +313,7 @@ ExecutionEngine::create(ExecutionEngineOptions options,
       return err.takeError();
   }
 
-  if (options.registerDebugPlugins) {
+  if (options.registerDebugPlugins && jitLinkLayer) {
     llvm::orc::ExecutionSession &session = *ee->executionSession;
 
     // Get the registrar for the GDB JIT loader interface.
@@ -220,7 +327,7 @@ ExecutionEngine::create(ExecutionEngineOptions options,
       if (plugin.isError())
         return plugin.takeError();
 
-      ee->objectLayer->addPlugin(std::move(*plugin));
+      jitLinkLayer->addPlugin(std::move(*plugin));
     } else if (tt.isOSBinFormatELF()) {
       // Register the ELFDebugObjectPlugin.
       llvm::Error error = llvm::Error::success();
@@ -228,22 +335,22 @@ ExecutionEngine::create(ExecutionEngineOptions options,
           session, /*RequireDebugSections=*/true, error);
       if (auto errOr = toModularErrorOr(std::move(error)); failed(errOr))
         return errOr.takeError();
-      ee->objectLayer->addPlugin(std::move(plugin));
+      jitLinkLayer->addPlugin(std::move(plugin));
     }
   }
 
-  if (options.registerPerfPlugins) {
+  if (options.registerPerfPlugins && jitLinkLayer) {
     auto debugInfo = llvm::orc::DebugInfoPreservationPlugin::Create();
     if (!debugInfo)
       return toModularError(debugInfo.takeError());
-    ee->objectLayer->addPlugin(std::move(debugInfo.get()));
+    jitLinkLayer->addPlugin(std::move(debugInfo.get()));
     auto perf = std::make_unique<llvm::orc::PerfSupportPlugin>(
-        ee->objectLayer->getExecutionSession().getExecutorProcessControl(),
+        jitLinkLayer->getExecutionSession().getExecutorProcessControl(),
         llvm::orc::ExecutorAddr::fromPtr(&llvm_orc_registerJITLoaderPerfStart),
         llvm::orc::ExecutorAddr::fromPtr(&llvm_orc_registerJITLoaderPerfEnd),
         llvm::orc::ExecutorAddr::fromPtr(&llvm_orc_registerJITLoaderPerfImpl),
         true, true);
-    ee->objectLayer->addPlugin(std::move(perf));
+    jitLinkLayer->addPlugin(std::move(perf));
   }
 
   // Add the platform dylib to the search order.

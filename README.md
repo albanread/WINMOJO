@@ -111,7 +111,8 @@ running record, which is where the real detail lives.
 | | State |
 | --- | --- |
 | `mojo build` (AOT) | **works** — produces a running native ARM64 PE/COFF binary |
-| `mojo run` / REPL (JIT) | **cannot work** — LLVM has no COFF/ARM64 JITLink backend |
+| `mojo run` (JIT) | **works** — on LLVM's RuntimeDyld, which has had a COFF/ARM64 backend since 2019; JITLink (the default layer) has none, and this README wrongly said "cannot work" until someone refused to believe it |
+| REPL | blocked on LLDB — Mojo's REPL is an LLDB front end, and lldb is not ported; nothing to do with the JIT |
 | native CPU target | **broken** — `oryon-1` crashes the compiler, see below |
 | standalone driver | works only with two environment overrides, see below |
 
