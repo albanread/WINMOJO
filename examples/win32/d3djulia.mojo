@@ -1,24 +1,33 @@
-# An animated Julia set, rendered by a pixel shader on the Adreno, from Mojo
-# on Windows ARM64. HLSL is compiled at run time with D3DCompile, the
-# fullscreen triangle comes from SV_VertexID (no vertex buffer, no input
-# layout), and the animation parameter travels in a 16-byte constant buffer.
+# An animated Julia set in a pixel shader, from Mojo on Windows ARM64 -- now
+# with a real window procedure written in Mojo and a real message loop.
 #
-# Everything the pipeline needs to know about Windows -- struct sizes, every
-# vtable slot, which DLL exports D3DCompile -- is queried from the metadata
-# by the compiler. There is not one hardcoded slot number or GUID below.
+# The window procedure is the fix for the flicker the first version had:
+# mixing a flip-model swap chain with GDI is a documented artifact -- DWM
+# alternates between the GDI redirection surface and the DXGI frames -- and
+# DefWindowProcW paints. Refusing WM_ERASEBKGND and validating WM_PAINT keeps
+# GDI's hands off the window entirely.
 #
-# The new objects (blobs, shaders, the constant buffer) are ComPtr-owned, so
-# their refcounting is the type system's problem: adopt on creation, Release
-# on scope exit, moves free.
+# Frame rate is locked to ~60 by syncing to the display's actual refresh rate
+# (read from DEVMODEW -- by field offset, without declaring the 272-byte
+# struct) and presenting every refresh/60 vblanks.
+#
+# Everything Windows-shaped is queried from the metadata: struct sizes and
+# field offsets, all vtable slots, the GetBuffer IID, which DLLs export
+# D3DCompile and EnumDisplaySettingsW. No hardcoded slots, sizes, or GUIDs.
 
 from std.ffi import c_int, OwnedDLHandle
 from std.math import cos, sin
 from std.memory import Pointer, OpaquePointer
+from std.python._cpython import _fn_ptr_as_opaque
 from std.sys.info import size_of
-from std.sys._winkb import winkb_struct_size, winkb_function_dll
 from std.sys._com import ComPtr, _guid_bytes, com_method_of
-from std.sys._winkb import winkb_interface_iid
 from std.sys._win32 import Win32Module
+from std.sys._winkb import (
+    winkb_field_offset,
+    winkb_function_dll,
+    winkb_interface_iid,
+    winkb_struct_size,
+)
 
 
 @fieldwise_init
@@ -154,13 +163,74 @@ def wide(s: StaticString) -> List[UInt16]:
 
 
 def cstr(s: StaticString) -> List[UInt8]:
-    """A NUL-terminated byte buffer for narrow C string parameters."""
     var out = List[UInt8]()
     for byte in s.as_bytes():
         out.append(byte)
     out.append(0)
     return out^
 
+
+# ===----------------------------------------------------------------------===#
+# The window procedure. Windows calls this; it is a plain C function whose
+# state, had it needed any, would travel through the window's user data.
+# ===----------------------------------------------------------------------===#
+
+comptime WM_DESTROY: UInt32 = 0x0002
+comptime WM_PAINT: UInt32 = 0x000F
+comptime WM_CLOSE: UInt32 = 0x0010
+comptime WM_QUIT: UInt32 = 0x0012
+comptime WM_ERASEBKGND: UInt32 = 0x0014
+
+comptime WndProcType = def (Int, UInt32, Int, Int) thin abi("C") -> Int
+
+
+@export("mojo_wndproc")
+def mojo_wndproc(
+    hwnd: Int, message: UInt32, wparam: Int, lparam: Int
+) abi("C") -> Int:
+    # Must never raise -- unwinding through a Windows frame is undefined --
+    # so everything is caught here. Win32Module hits the process cache, which
+    # is what makes calling it from inside a message callback reasonable.
+    try:
+        var user32 = Win32Module("user32.dll")
+
+        if message == WM_ERASEBKGND:
+            # The flicker fix, part one: claim the background is handled so
+            # GDI never clears the window out from under the swap chain.
+            return 1
+
+        if message == WM_PAINT:
+            # Part two: validate without painting. BeginPaint would give GDI
+            # a surface DWM then fights the DXGI frames with.
+            var ValidateRect = user32.function[
+                def (Int, Int) thin abi("C") -> c_int
+            ]("ValidateRect")
+            _ = ValidateRect(hwnd, Int(0))
+            return 0
+
+        if message == WM_CLOSE:
+            var DestroyWindow = user32.function[
+                def (Int) thin abi("C") -> c_int
+            ]("DestroyWindow")
+            _ = DestroyWindow(hwnd)
+            return 0
+
+        if message == WM_DESTROY:
+            var PostQuitMessage = user32.function[
+                def (c_int) thin abi("C") -> NoneType
+            ]("PostQuitMessage")
+            _ = PostQuitMessage(c_int(0))
+            return 0
+
+        var DefWindowProcW = user32.function[WndProcType]("DefWindowProcW")
+        return DefWindowProcW(hwnd, message, wparam, lparam)
+    except:
+        return 0
+
+
+# ===----------------------------------------------------------------------===#
+# Shaders
+# ===----------------------------------------------------------------------===#
 
 comptime HLSL: StaticString = """
 struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
@@ -176,11 +246,11 @@ VSOut vsmain(uint id : SV_VertexID) {
 cbuffer Params : register(b0) { float4 p; };  // x,y: c   z: aspect   w: time
 
 float4 psmain(VSOut i) : SV_Target {
-    float2 z = float2((i.uv.x * 2.0 - 1.0) * p.z, i.uv.y * 2.0 - 1.0) * 1.5;
+    float2 z = float2((i.uv.x * 2.0 - 1.0) * p.z, i.uv.y * 2.0 - 1.0) * 1.6;
     float2 c = float2(p.x, p.y);
     float m = 0.0;
     bool escaped = false;
-    [loop] for (int k = 0; k < 160; k++) {
+    [loop] for (int k = 0; k < 200; k++) {
         z = float2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
         float r2 = dot(z, z);
         if (r2 > 16.0) {
@@ -191,8 +261,9 @@ float4 psmain(VSOut i) : SV_Target {
     }
     if (!escaped)
         return float4(0.02, 0.01, 0.05, 1.0);
-    float3 col =
-        0.5 + 0.5 * cos(6.28318 * (m * 0.015 + float3(0.00, 0.33, 0.67)));
+    float3 col = 0.5
+        + 0.5 * cos(6.28318 * (m * 0.012 + p.w * 0.03
+                               + float3(0.00, 0.33, 0.67)));
     return float4(col, 1.0);
 }
 """
@@ -215,10 +286,8 @@ def blob_size(blob: ComPtr) raises -> Int:
 
 
 def blob_text(blob: ComPtr) raises -> String:
-    """The bytes of an ID3DBlob as a String -- shader compile errors."""
     var ptr = blob_ptr(blob)
     var n = blob_size(blob)
-
     var bytes = List[UInt8]()
     var src = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=ptr)
     for i in range(n):
@@ -236,7 +305,6 @@ def compile_shader(
     entry: StaticString,
     target: StaticString,
 ) raises -> ComPtr[StaticString("ID3DBlob")]:
-    """Compiles one HLSL entry point, raising with the compiler's own text."""
     var src = cstr(source)
     var entry_c = cstr(entry)
     var target_c = cstr(target)
@@ -245,10 +313,10 @@ def compile_shader(
 
     var hr = compile_fn(
         Int(src.unsafe_ptr()),
-        len(src) - 1,  # exclude the NUL
-        Int(0),  # source name
-        Int(0),  # defines
-        Int(0),  # includes
+        len(src) - 1,
+        Int(0),
+        Int(0),
+        Int(0),
         Int(entry_c.unsafe_ptr()),
         Int(target_c.unsafe_ptr()),
         UInt32(0),
@@ -256,15 +324,43 @@ def compile_shader(
         Pointer(to=code_addr).unsafe_origin_cast[MutAnyOrigin](),
         Pointer(to=errors_addr).unsafe_origin_cast[MutAnyOrigin](),
     )
-
     if hr != 0:
         var message = String("(no error blob)")
         if errors_addr != 0:
             var errors = ComPtr[StaticString("ID3DBlob")](adopt=errors_addr)
             message = blob_text(errors)
         raise Error("HLSL " + String(entry) + " failed: " + message)
-
     return ComPtr[StaticString("ID3DBlob")](adopt=code_addr)
+
+
+def display_refresh_hz(user32: OwnedDLHandle) raises -> Int:
+    """The current display mode's refresh rate, read from DEVMODEW by field
+    offset -- the struct is 272 bytes and never declared."""
+    var EnumDisplaySettingsW = user32.get_function[c_int](
+        "EnumDisplaySettingsW"
+    )
+
+    comptime DM_BYTES = winkb_struct_size["DEVMODEW"]()
+    var devmode = List[UInt8](length=DM_BYTES, fill=0)
+
+    # dmSize must hold the struct size before the call.
+    comptime DM_SIZE_AT = winkb_field_offset["DEVMODEW", "dmSize"]()
+    devmode.unsafe_ptr().unsafe_offset(DM_SIZE_AT).unsafe_bitcast[UInt16]()[] = (
+        UInt16(DM_BYTES)
+    )
+
+    # ENUM_CURRENT_SETTINGS is (DWORD)-1.
+    var ok = EnumDisplaySettingsW(
+        Int(0), UInt32(0xFFFFFFFF), devmode.unsafe_ptr()
+    )
+    if ok == 0:
+        return 60  # a sane default if the query fails
+
+    comptime FREQ_AT = winkb_field_offset["DEVMODEW", "dmDisplayFrequency"]()
+    var hz = Int(
+        devmode.unsafe_ptr().unsafe_offset(FREQ_AT).unsafe_bitcast[UInt32]()[]
+    )
+    return hz if hz > 0 else 60
 
 
 def main() raises:
@@ -290,12 +386,10 @@ def main() raises:
     var ShowWindow = user32.get_function[c_int]("ShowWindow")
     var PeekMessageW = user32.get_function[c_int]("PeekMessageW")
     var DispatchMessageW = user32.get_function[Int]("DispatchMessageW")
-    var DestroyWindow = user32.get_function[c_int]("DestroyWindow")
     var create_device = d3d11.get_function[c_int](
         "D3D11CreateDeviceAndSwapChain"
     )
 
-    # The shader compiler ships with Windows; the metadata says where.
     print("D3DCompile lives in", winkb_function_dll["D3DCompile"]())
     var compiler_dll = Win32Module("d3dcompiler_47.dll")
     var D3DCompile = compiler_dll.function[
@@ -306,19 +400,27 @@ def main() raises:
         ) thin abi("C") -> Int32
     ]("D3DCompile")
 
-    var def_proc = user32.get_symbol[NoneType]("DefWindowProcW")
-    if not def_proc:
-        raise Error("DefWindowProcW not found")
+    # -- the 60fps lock ------------------------------------------------------
+    var hz = display_refresh_hz(user32)
+    var interval = (hz + 30) // 60
+    if interval < 1:
+        interval = 1
+    print(
+        "display refresh", hz, "Hz -> present every", interval,
+        "vblank(s) = ~", hz // interval, "fps",
+    )
 
-    # -- window ------------------------------------------------------------
+    # -- window, with the Mojo window procedure ------------------------------
     var hInstance = GetModuleHandleW(Int(0))
     var class_name = wide("MojoJuliaWindow")
     var title = wide("Julia set - Mojo pixel shader on Windows ARM64")
 
+    var proc: WndProcType = mojo_wndproc
+
     var wc = WNDCLASSEXW()
     wc.cbSize = UInt32(size_of[WNDCLASSEXW]())
     wc.style = 0x0003
-    wc.lpfnWndProc = Int(def_proc.value())
+    wc.lpfnWndProc = Int(_fn_ptr_as_opaque(proc))
     wc.hInstance = hInstance
     wc.lpszClassName = Int(class_name.unsafe_ptr())
 
@@ -347,19 +449,19 @@ def main() raises:
         raise Error("CreateWindowExW failed")
     _ = ShowWindow(hwnd, c_int(5))
 
-    # -- device + swap chain -----------------------------------------------
+    # -- device + swap chain -------------------------------------------------
     var desc = DXGI_SWAP_CHAIN_DESC()
     desc.Width = UInt32(WIDTH)
     desc.Height = UInt32(HEIGHT)
     desc.RefreshRateNumerator = 60
     desc.RefreshRateDenominator = 1
-    desc.Format = 87  # DXGI_FORMAT_B8G8R8A8_UNORM
+    desc.Format = 87
     desc.SampleCount = 1
-    desc.BufferUsage = 32  # DXGI_USAGE_RENDER_TARGET_OUTPUT
+    desc.BufferUsage = 32
     desc.BufferCount = 2
     desc.OutputWindow = hwnd
     desc.Windowed = 1
-    desc.SwapEffect = 4  # DXGI_SWAP_EFFECT_FLIP_DISCARD
+    desc.SwapEffect = 4  # FLIP_DISCARD
 
     var swapchain_addr: Int = 0
     var device_addr: Int = 0
@@ -392,11 +494,9 @@ def main() raises:
         unsafe_from_address=context_addr
     )
 
-    # -- back buffer + render target view ----------------------------------
+    # -- back buffer + render target view ------------------------------------
     var backbuf_addr: Int = 0
-    # The IID comes from the metadata; _guid_bytes reorders it for COM.
     var iid_texture = _guid_bytes(winkb_interface_iid["ID3D11Texture2D"]())
-
     var hr2 = com_method_of[
         def (
             OpaquePointer[MutUntrackedOrigin],
@@ -414,9 +514,7 @@ def main() raises:
     )
     if hr2 != 0:
         raise Error("GetBuffer failed")
-    var backbuffer = ComPtr[StaticString("ID3D11Texture2D")](
-        adopt=backbuf_addr
-    )
+    var backbuffer = ComPtr[StaticString("ID3D11Texture2D")](adopt=backbuf_addr)
 
     var rtv_addr: Int = 0
     var hr3 = com_method_of[
@@ -437,7 +535,7 @@ def main() raises:
     if hr3 != 0:
         raise Error("CreateRenderTargetView failed")
 
-    # -- shaders -----------------------------------------------------------
+    # -- shaders -------------------------------------------------------------
     var vs_blob = compile_shader(D3DCompile, HLSL, "vsmain", "vs_5_0")
     var ps_blob = compile_shader(D3DCompile, HLSL, "psmain", "ps_5_0")
     print("shaders compiled")
@@ -486,11 +584,11 @@ def main() raises:
         raise Error("CreatePixelShader failed")
     var pshader = ComPtr[StaticString("ID3D11PixelShader")](adopt=ps_addr)
 
-    # -- constant buffer ----------------------------------------------------
+    # -- constant buffer -----------------------------------------------------
     var cb_desc = D3D11_BUFFER_DESC()
-    cb_desc.ByteWidth = 16  # one float4
-    cb_desc.Usage = 0  # D3D11_USAGE_DEFAULT
-    cb_desc.BindFlags = 4  # D3D11_BIND_CONSTANT_BUFFER
+    cb_desc.ByteWidth = 16
+    cb_desc.Usage = 0
+    cb_desc.BindFlags = 4
 
     var cbuf_addr: Int = 0
     var hr6 = com_method_of[
@@ -512,7 +610,7 @@ def main() raises:
         raise Error("CreateBuffer failed")
     var cbuffer = ComPtr[StaticString("ID3D11Buffer")](adopt=cbuf_addr)
 
-    # -- fixed pipeline state, set once -------------------------------------
+    # -- fixed pipeline state ------------------------------------------------
     var viewport = D3D11_VIEWPORT()
     viewport.Width = Float32(WIDTH)
     viewport.Height = Float32(HEIGHT)
@@ -586,7 +684,7 @@ def main() raises:
         ) thin abi("C") -> NoneType,
         "ID3D11DeviceContext",
         "IASetPrimitiveTopology",
-    ](context)(context, UInt32(4))  # TRIANGLELIST
+    ](context)(context, UInt32(4))
 
     var update = com_method_of[
         def (
@@ -616,17 +714,30 @@ def main() raises:
         "Present",
     ](swapchain)
 
-    # -- the animation -------------------------------------------------------
+    # -- the real message loop: run until the window is closed ---------------
+    print("running until the window closes")
     var params = List[Float32](length=4, fill=0.0)
     var msg = MSG()
     var frames = 0
+    var running = True
 
-    for i in range(900):
-        # c orbits just inside the main cardioid's reach, where the sets stay
-        # connected and keep changing shape.
-        var theta = Float32(i) * 0.012
-        params[0] = 0.7885 * cos(theta)
-        params[1] = 0.7885 * sin(theta)
+    while running:
+        while PeekMessageW(
+            Pointer(to=msg), Int(0), UInt32(0), UInt32(0), UInt32(1)
+        ) != 0:
+            if msg.message == WM_QUIT:
+                running = False
+            else:
+                _ = DispatchMessageW(Pointer(to=msg))
+        if not running:
+            break
+
+        # c rides just inside the cardioid boundary, where the sets are most
+        # dramatic: theta at ~0.35 rad/s of locked-60 time.
+        var theta = Float32(frames) * (0.35 / 60.0)
+        var scale = Float32(0.985)
+        params[0] = scale * (0.5 * cos(theta) - 0.25 * cos(2.0 * theta))
+        params[1] = scale * (0.5 * sin(theta) - 0.25 * sin(2.0 * theta))
         params[2] = Float32(WIDTH) / Float32(HEIGHT)
         params[3] = theta
 
@@ -640,16 +751,9 @@ def main() raises:
             UInt32(0),
         )
         draw(context, UInt32(3), UInt32(0))
-        var phr = present(swapchain, UInt32(1), UInt32(0))
+        var phr = present(swapchain, UInt32(interval), UInt32(0))
         if phr != 0:
             raise Error("Present failed, hr = " + String(phr))
         frames += 1
 
-        while PeekMessageW(
-            Pointer(to=msg), Int(0), UInt32(0), UInt32(0), UInt32(1)
-        ) != 0:
-            _ = DispatchMessageW(Pointer(to=msg))
-
-    print("presented", frames, "Julia frames on the GPU")
-    _ = DestroyWindow(hwnd)
-    print("done")
+    print("window closed after", frames, "frames (", frames // 60, "s )")

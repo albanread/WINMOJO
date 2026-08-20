@@ -1690,3 +1690,23 @@ conventions (HRESULT, BOOL+GetLastError, sentinel HANDLEs -- the metadata
 knows which is which) into `raises`, and emitting vtables instead of
 dispatching over them for server-side COM. The dispatcher's table read is
 direction-agnostic.
+
+### The callback direction, soaked
+
+The last unproven mechanism was Windows calling into Mojo. The Julia demo now
+registers a window procedure written in Mojo -- `@export def mojo_wndproc(...)
+abi("C")`, coerced to a thin function value and bitcast to the LPARAM-shaped
+pointer with the stdlib's own `_fn_ptr_as_opaque`, the same machinery CPython's
+tp_dealloc callbacks ride. Inside the callback, Win32Module hits the process
+cache, which is what makes calling it from message context reasonable.
+
+The procedure is also the flicker fix. Flip-model DXGI sharing a window with
+GDI is a documented artifact -- DefWindowProcW erases and paints, DWM
+alternates surfaces -- and the cure is refusing WM_ERASEBKGND and answering
+WM_PAINT with ValidateRect alone, which no default-proc window can do.
+
+Verified by the only camera that counts: the demo ran on screen for 1,286
+seconds -- 77,166 frames, 60.002 fps against a refresh-rate-derived present
+interval, the rate read from DEVMODEW by winkb field offset without declaring
+the 272-byte struct -- through twenty-one minutes of live message traffic,
+and exited cleanly through WM_CLOSE -> WM_DESTROY -> PostQuitMessage.
