@@ -1242,10 +1242,13 @@ symlink tree and cost nothing; Windows Bazel assumes symlinks are
 unavailable and instead packs the entire runfiles closure into a
 self-extracting zip per target — measured here at 122 MB and 2,540 files,
 including the hermetic CPython and its OpenSSL .pdb files, taking about two
-minutes each across roughly two hundred targets. This machine has Developer
-Mode enabled, so symlinks work: `--nobuild_python_zip --enable_runfiles`
+minutes each across roughly two hundred targets. `--nobuild_python_zip --enable_runfiles`
 deleted the whole category and took the action graph from 11,770 to ~3,500
 for the same test set.
+
+> **Correction.** This entry originally read "this machine has Developer Mode
+> enabled, so symlinks work." Both halves were false, and the error was
+> expensive — see *`ln -s` lies* below.
 
 **Defender was scanning every object file.** Real-time protection with no
 exclusion covering the Bazel output base — where every .obj, .lib and .pdb
@@ -1285,3 +1288,81 @@ Until then the protections are: the disk cache (re-enabled at
 C:/bazel-cache/winmojo, 60 GB cap, now that the configuration has stopped
 moving) and the discipline of never running `bazel clean` — the output base
 is currently the only copy of work that costs an hour to reproduce.
+
+---
+
+## `ln -s` lies: 214 GB and the flag that was missing
+
+The entry above once claimed this machine had Developer Mode enabled and
+that symlinks therefore worked. Neither was true. That single sentence
+filled a 475 GB disk twice and cost the better part of a day, so it is worth
+recording precisely how a one-line check produced a confident wrong answer.
+
+The check was `ln -s` in Git Bash. It succeeded. MSYS, when the OS refuses a
+symlink, silently falls back to **copying** — so the probe cannot fail, and
+proves nothing. The machine's actual state was Developer Mode off,
+`AllowDevelopmentWithoutDevLicense` unset, and native symlink creation
+denied.
+
+### Three ways to give a Windows test its runfiles, all bad
+
+| Strategy | Cost per target | How it fails |
+| --- | --- | --- |
+| manifest only | nothing | a `py_binary` cannot bootstrap from a manifest — `//KGEN:gen_dialect_checksum` dies at build time |
+| `--build_python_zip` | 122 MB, ~2 min | bounded but slow: ~25 GB and hours across the test set |
+| `--enable_runfiles`, no symlinks | **3.3 GB**, 6,989 real files | fills the disk |
+
+The tree is expensive because a mojo test's runfiles carry the entire
+toolchain — `clang++.exe` at 98 MB, `lld` at 65 MB — once per target, across
+roughly two hundred targets. Copied, that is the whole disk. Symlinked, it
+is nothing. The strategy is not a tuning preference; it is the difference
+between a test suite that runs and one that cannot.
+
+### Developer Mode is necessary and not sufficient
+
+With Developer Mode on and the machine rebooted, `os.symlink()` succeeded
+unprivileged — and Bazel *still* wrote 6,989 real files. Bazel does not emit
+Windows symlinks on OS capability alone. It needs a **startup** option,
+which is easy to miss because every other knob here is a `build` option:
+
+```
+startup --windows_enable_symlinks
+build --nobuild_python_zip
+build --enable_runfiles
+```
+
+With both the OS setting and the flag in place, the same tree is 1.9 MB and
+6,990 symlinks with zero real files. A factor of about 1,700, and the zip
+step disappears with it.
+
+Changing a startup option restarts the Bazel server, which discards the
+in-memory analysis cache but not the on-disk action cache: re-analysis is
+seconds, and nothing recompiles. Worth knowing before hesitating over it.
+
+### How to test this properly
+
+Two of the three obvious probes lie, in opposite directions:
+
+- **Git Bash `ln -s`** — copies when it cannot link, so it always succeeds.
+  A false positive, and the origin of this entire episode.
+- **PowerShell 5.1 `New-Item -ItemType SymbolicLink`** — does not pass
+  `SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE`, so it reports
+  "Administrator privilege required" even once Developer Mode has made the
+  operation legal. A false negative.
+- **Python `os.symlink()`** — passes the flag, and so matches what Bazel
+  actually does. This is the probe to use.
+
+The broader lesson is not about symlinks. Both wrong turns would have been
+caught in seconds by measuring the artifact instead of reasoning about the
+setting: `find <tree> -type l | wc -l` against `-type f` is the ground
+truth, and the size of one materialized tree answers the question outright.
+A capability check is only as good as its resemblance to the caller.
+
+### What makes the cheap strategies viable at all
+
+Two earlier changes are load-bearing here and should not be reverted
+casually. `lit.common.configured.in` resolves FileCheck through
+`python.runfiles` rather than path arithmetic, and the rules_mojo patch
+materializes dependency DLLs beside each test binary — the OS loader cannot
+read a manifest. Without both, the zip strategy is the only one that works,
+and the disk cost comes straight back.
