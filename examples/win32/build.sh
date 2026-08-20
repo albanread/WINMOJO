@@ -59,8 +59,24 @@ export MODULAR_MOJO_MAX_COMPILERRT_PATH="$repo/bazel-bin/KGEN/KGENCompilerRTShar
 # winkb_struct_size or winkb_field_offset fails to elaborate without it.
 export MODULAR_MOJO_MAX_WINKB_PATH="$sysroot/../+new_local_repository+winkb/windows_api.db"
 
+# -I for anything beyond std. MODULAR_MOJO_MAX_IMPORT_PATH names one place;
+# the `max` package (GPU work) is a separate build output, so it comes in on
+# the command line. Built by `bazelw build //max/mojo/max:max`.
+extra=()
+[[ -d "$repo/bazel-bin/max/mojo/max" ]] && extra=(-I "$repo/bazel-bin/max/mojo/max")
+
+# The device runtime, when it has been built (`bazelw build
+# //dragon/runtime:dragonrt`). Bazel-driven builds get it through the wheel
+# remap in bazel/api.bzl; a standalone build has to name the .lib itself or
+# every AsyncRT_* symbol is unresolved. A static lib contributes nothing to
+# binaries that reference none of it, so adding it unconditionally is safe.
+if [[ -f "$repo/bazel-bin/dragon/runtime/dragonrt.lib" ]]; then
+  extra+=(-Xlinker "$(cygpath -w "$repo/bazel-bin/dragon/runtime/dragonrt.lib")")
+fi
+
 "$repo/bazel-bin/KGEN/tools/mojo/mojo.exe" build \
   --target-cpu generic \
+  "${extra[@]}" \
   -o "$out/$example.exe" \
   "$repo/examples/win32/$example.mojo" "$@"
 

@@ -351,3 +351,32 @@ And two that bite after a successful link:
   `KGENCompilerRTShared.dll` and the `*Globals.dll` it imports are found next
   to the binary or not at all — and "not at all" is a silent `0xC0000135`
   before `main`, with no message of any kind.
+
+---
+
+## `Optional[Pointer]` at the C boundary
+
+`Pointer` is non-nullable and `Optional[Pointer]` is niche-optimised to one
+pointer-sized field — but it is still an aggregate to the lowering:
+
+> *failed to legalize operation 'pop.external_call' ...
+> `(!kgen.struct<(struct<(struct<(pointer<none>) memoryOnly>)>)>)`*
+
+`memoryOnly` means it is passed indirectly, so a C callee declared to take
+`uint64_t *` (nullable pointer) reads a pointer *to* the optional, not the
+pointer inside it — or, in a mixed module where another call site already
+declared the symbol, the two signatures conflict and compilation fails with
+*"existing function with conflicting signature"*. Either way the C side never
+receives the address.
+
+For a nullable C pointer parameter, pass the address as an integer:
+
+```mojo
+Int(opt.value()) if opt else 0
+```
+
+One register, null for None, and the `external_call` signature stays identical
+at every call site. Found via `AsyncRT_DeviceContext_enqueueFunctionDirect`,
+whose `argSizes` had been arriving as NULL — silently, because a null argSizes
+has a defined meaning ("assume pointer-sized"), which is the worst kind of
+default.

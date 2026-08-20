@@ -15,10 +15,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "SpirvKernelArgAddressSpace.h"
 #include "Target/Spirv/SpirvTraits.h"
 #include "Target/TargetLowering.h"
 
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Pass/PassManager.h"
 
 namespace M::KGEN {
 namespace {
@@ -41,6 +43,16 @@ public:
     auto llvmFunc = mlir::dyn_cast<mlir::LLVM::LLVMFuncOp>(func);
     return llvmFunc &&
            llvmFunc.getCConv() == mlir::LLVM::cconv::CConv::SPIR_KERNEL;
+  }
+
+  /// A kernel's pointer parameters have to be moved out of the default address
+  /// space before translation, or the backend emits them as Function storage
+  /// and the driver rejects the program at clCreateKernel. This runs as a late
+  /// pass rather than inside `markExportedKernel` because that hook fires
+  /// during signature conversion, before the body exists to rewrite alongside
+  /// it.
+  void addPostLowerToLLVMPasses(mlir::OpPassManager &pm) const override {
+    pm.addPass(createSpirvKernelArgAddressSpacePass());
   }
 
 protected:

@@ -1303,3 +1303,108 @@ that lands, the bridge becomes dead code and should be deleted.
 
 Expected on their side after merging: their existing built binary re-run =
 **adreno_saxpy PASS**.
+
+---
+
+## 2026-08-20 — SG4 green: `mojo build --target-accelerator adreno-x1` PASSES
+
+```
+PASS: all 4096 elements correct on Qualcomm(R) Adreno(TM) X1-45 GPU
+```
+
+That is the unmodified acceptance test, compiled by this tree's compiler,
+launched through dragonrt, with `DRAGONRT_NO_SPV_FIXUP=1` — no bridge, no
+patched module, no hand-holding. The bridge is deleted, per its own comment.
+
+Their root cause held exactly as stated, and landing the compiler fix
+uncovered three more bugs stacked behind it, each invisible until the one
+above it was gone. The stack, in the order it peeled:
+
+### 1. The compiler fix: `SpirvKernelArgAddressSpace` (KGENToLLVM)
+
+A late MLIR pass on the LLVM dialect, contributed by `SpirvLowering` through
+`addPostLowerToLLVMPasses` — not inside `markExportedKernel`, which fires
+during signature conversion, before a body exists to rewrite alongside it.
+It promotes addrspace(0) pointer params of `SPIR_KERNEL` functions to
+addrspace(1) and propagates through the derived GEP/bitcast closure.
+Conservative on purpose: it scans the full use closure first and refuses
+wholesale — with a warning naming the offending op — rather than
+half-promote, because one access in the wrong space is exactly the bug class
+being removed. `spv_tool.py` on the fresh dump confirms:
+
+```
+%6 = OpTypePointer CrossWorkgroup %5
+kernel param 0..2: pointer, storage CrossWorkgroup
+```
+
+### 2. `clSetKernelArg(3, size=8) failed: -51` — argSizes never arrived
+
+With create/launch unblocked, the scalar argument failed: dragonrt received
+`argSizes=NULL` and guessed pointer-sized for the float. Two causes, both in
+the max package's launch paths:
+
+- **`Optional[Pointer]` does not cross `external_call` as a pointer.** It is
+  niche-optimised to one field, but it still lowers as
+  `!kgen.struct<(struct<(struct<(pointer<none>) memoryOnly>)>)>` and is
+  passed indirectly — the callee reads garbage-or-null. Both
+  `enqueueFunctionDirect` bindings now pass
+  `Int(arg_sizes.value()) if arg_sizes else 0`: one register, null for None.
+  (Proved with a temporary `DragonRT_ProbePointer` export, since deleted;
+  the compile-time diagnostic that settled it — "existing function with
+  conflicting signature ... memoryOnly" — is recorded in DIALECT-NOTES.)
+- **`_call_with_pack_checked` never built a sizes array at all** — it passed
+  `Optional[...]()`  where the unchecked path allocates and fills one. It now
+  allocates `dense_args_sizes`, records each translated argument's DEVICE
+  size (unaligned — `clSetKernelArg` wants the argument's width, not its
+  padded stride in the staging buffer), and hands the compaction helper the
+  same array so surviving captures keep their sizes.
+
+`DRAGONRT_TRACE_ARGS=1` (kept, in dragonrt) now shows `8 8 8 4`.
+
+### 3. Kernel ran, 4071/4096 wrong — transfers were never coherent
+
+The index probe cleared the obvious suspect: every work-item computes the
+right index (`block_idx`/`block_dim`/`thread_idx` all correct, zero holes),
+so the off-flavor v3i32 builtins are confirmed harmless a second way. A
+passthrough kernel (`dst = x`) then failed the same way saxpy did, which
+moved the fault below the arithmetic: the kernel reads garbage.
+
+The H2D copies were arriving (`DRAGONRT_TRACE_COPY=1`, kept, shows correct
+mem/hostPtr/bytes on every call) and `clEnqueueWriteBuffer` returned
+CL_SUCCESS. But on OpenCLOn12, measured today:
+
+- a `CL_FALSE` WriteBuffer followed by an NDRange **on the same in-order
+  queue** hands the kernel stale data — the ordering guarantee is not
+  honoured for the write's visibility;
+- and even with `clFinish` between them, **the first 16 bytes** of the
+  destination arrive corrupted, deterministically.
+
+Nobody had ever seen this because nothing before today both wrote a buffer
+from the host and then read it in a kernel: test_dragonrt's HtoD calls have
+a whole program-compile between copy and launch, and the index probe only
+ever read back what its own kernel wrote. A kernel-free H2D→D2H echo made
+it visible in one run: first four floats garbage, 4092 correct.
+
+Every host-touching transfer in dragonrt is now blocking (`CL_TRUE`). The
+`_async` ABI contract is still honoured — the caller synchronizes before
+reading results — so this trades copy/compute overlap we were not using for
+correctness. When overlap matters, the right fix is events, not CL_FALSE.
+
+### The ledger
+
+- saxpy, index probe, and the copy-echo/passthrough/saxpy debug harness all
+  report 0 of 4096 wrong, bridge deleted, no env vars.
+- `adreno_index_probe.mojo` and `adreno_saxpy_debug.mojo` stay in
+  examples/win32: one verifies the index layer, the other the transfer
+  layer, and today proved those are exactly the two layers that fail
+  independently.
+- `examples/win32/build.sh` now finds the max package and dragonrt.lib
+  itself; `mojo build --target-accelerator adreno-x1 X.mojo` is one command.
+- Still open, GPU team's side: `bazelw test //dragon/runtime:test_dragonrt`
+  fails with "cannot load dragonrt.dll (126)" — the test LoadLibrary's a DLL
+  the Bazel target does not produce (it builds a static .lib). Their
+  workflow evidently builds the DLL out of band; either a `cc_binary`
+  linkshared target or a static-link variant of the test would make it run
+  under Bazel.
+- Two trace switches stay: `DRAGONRT_TRACE_ARGS`, `DRAGONRT_TRACE_COPY`.
+  Both are one `getenv` on a cold path.

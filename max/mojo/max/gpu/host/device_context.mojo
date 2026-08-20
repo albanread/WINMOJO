@@ -2220,6 +2220,16 @@ struct DeviceStream(ImplicitlyCopyable, _FunctionEnqueuer):
         # memory size, and attribute count (see `MojoBindings.cpp`), so the
         # emitted `external_call` signature lines up with the runtime symbol
         # and with the other enqueue launch paths.
+        # `arg_sizes` crosses as an address, not as an `OptionalPointer`.
+        # `Optional[Pointer]` is niche-optimised to one pointer-sized field,
+        # but it still lowers as a nested aggregate --
+        # `!kgen.struct<(struct<(struct<(pointer<none>) memoryOnly>)>)>` -- and
+        # `pop.external_call` passes that indirectly. The callee then reads a
+        # null `argSizes` and silently falls back to pointer-sized arguments,
+        # which is right for buffers and wrong for scalars: the first symptom
+        # is CL_INVALID_ARG_SIZE on whichever argument happens to be a scalar,
+        # with nothing pointing at the ABI. Passing the address keeps the
+        # nullable-pointer C parameter exactly one register wide.
         return external_call[
             "AsyncRT_DeviceStream_enqueueFunctionDirect", _CString[]
         ](
@@ -2236,7 +2246,7 @@ struct DeviceStream(ImplicitlyCopyable, _FunctionEnqueuer):
             c_uint(num_attributes),
             args,
             arg_count,
-            arg_sizes,
+            Int(arg_sizes.value()) if arg_sizes else 0,
         )
 
     @doc_hidden
@@ -3355,16 +3365,29 @@ struct DeviceFunction[
         var dense_args_addrs: Pointer[
             OpaquePointer[MutAnyOrigin], MutUntrackedOrigin
         ]
+        # Sizes travel with the addresses. A backend that binds arguments by
+        # size rather than by a pre-declared signature -- OpenCL's
+        # `clSetKernelArg` does -- has no other way to know that argument 3 is
+        # a 4-byte float and not an 8-byte pointer, and guessing pointer-sized
+        # fails only on the scalars, only at launch, with an error that names
+        # the argument index and nothing else.
+        var dense_args_sizes: Pointer[UInt64, MutUntrackedOrigin]
         if num_captures > num_captures_static:
             dense_args_addrs = alloc(
                 Layout[OpaquePointer[MutAnyOrigin]](
                     count=num_captures + num_passed_args
                 )
             ).unsafe_leak()
+            dense_args_sizes = alloc(
+                Layout[UInt64](count=num_captures + num_passed_args)
+            ).unsafe_leak()
         else:
             dense_args_addrs = unsafe_stack_allocation[
                 num_captures_static + num_passed_args,
                 OpaquePointer[MutAnyOrigin],
+            ]()
+            dense_args_sizes = unsafe_stack_allocation[
+                num_captures_static + num_passed_args, UInt64
             ]()
 
         if num_captures > 0:
@@ -3441,6 +3464,14 @@ struct DeviceFunction[
                     dense_args_addrs[
                         unsafe_offset=translated_arg_idx
                     ] = first_word_addr.as_unsafe_any_origin()
+                    # The DEVICE type's size, and unaligned: `clSetKernelArg`
+                    # wants the argument's own width, not its padded stride in
+                    # the staging buffer.
+                    dense_args_sizes[unsafe_offset=translated_arg_idx] = (
+                        UInt64(
+                            size_of[Ts[i].device_type, target=Self.target]()
+                        )
+                    )
                     translated_arg_idx += 1
 
             # Drop zero-sized captures so the packed slots match the device
@@ -3451,6 +3482,7 @@ struct DeviceFunction[
                 self._func_impl.capture_sizes,
                 num_translated_args,
                 num_captures,
+                dense_args_sizes=dense_args_sizes,
             )
 
             _checked_call[Self.func](
@@ -3463,7 +3495,9 @@ struct DeviceFunction[
                     len(attributes),
                     dense_args_addrs.as_unsafe_any_origin(),
                     UInt32(effective_argc),
-                    Optional[Pointer[UInt64, MutUntrackedOrigin]](),
+                    Optional[Pointer[UInt64, MutUntrackedOrigin]](
+                        dense_args_sizes
+                    ),
                 ),
                 device_context=self._context,
                 location=location.or_else(call_location()),
@@ -3860,6 +3894,16 @@ struct DeviceContext(ImplicitlyCopyable, RegisterPassable, _FunctionEnqueuer):
         # paths declare `AsyncRT_DeviceContext_enqueueFunctionDirect` with
         # conflicting (i64 vs i32) signatures, which fails to legalize when a
         # graph composes both launch paths into one module.
+        # `arg_sizes` crosses as an address, not as an `OptionalPointer`.
+        # `Optional[Pointer]` is niche-optimised to one pointer-sized field,
+        # but it still lowers as a nested aggregate --
+        # `!kgen.struct<(struct<(struct<(pointer<none>) memoryOnly>)>)>` -- and
+        # `pop.external_call` passes that indirectly. The callee then reads a
+        # null `argSizes` and silently falls back to pointer-sized arguments,
+        # which is right for buffers and wrong for scalars: the first symptom
+        # is CL_INVALID_ARG_SIZE on whichever argument happens to be a scalar,
+        # with nothing pointing at the ABI. Passing the address keeps the
+        # nullable-pointer C parameter exactly one register wide.
         return external_call[
             "AsyncRT_DeviceContext_enqueueFunctionDirect", _CString[]
         ](
@@ -3876,7 +3920,7 @@ struct DeviceContext(ImplicitlyCopyable, RegisterPassable, _FunctionEnqueuer):
             c_uint(num_attributes),
             args,
             arg_count,
-            arg_sizes,
+            Int(arg_sizes.value()) if arg_sizes else 0,
         )
 
     @always_inline

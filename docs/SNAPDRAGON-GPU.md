@@ -264,3 +264,31 @@ path with IL support is the path the Julia demo used.
 
 Route 1 is the smallest change and the only one keeping the native driver.
 Route 3 is the most robust and the most work.
+
+---
+
+# Postscript: SG4 is green
+
+*(2026-08-20, superseding "where the line actually stops" above — the line
+moved.)*
+
+Route 2 (SPIR-V through OpenCLOn12) went from "may work unmodified" to
+working, in four steps recorded fully in DRAGONMAX-JOURNAL.md:
+
+1. `clCreateKernel -5` was Function-storage kernel pointer parameters — the
+   GPU team's root cause, verified byte-for-byte. Fixed in the compiler:
+   `SpirvKernelArgAddressSpace` promotes kernel pointer params to
+   CrossWorkgroup on the spirv triple. Their temporary bridge in dragonrt is
+   deleted, per its own comment.
+2. `argSizes` never crossed the C boundary (`Optional[Pointer]` lowers as an
+   indirect aggregate; the checked launch path never built the array at
+   all). Both fixed in the max package's launch paths.
+3. OpenCLOn12 does not honour in-order visibility for `CL_FALSE` host
+   transfers, and corrupts the first 16 bytes even after `clFinish`. All
+   host-touching transfers in dragonrt are now blocking.
+4. `PASS: all 4096 elements correct on Qualcomm(R) Adreno(TM) X1-45 GPU` —
+   the unmodified acceptance test, one command:
+   `./examples/win32/build.sh adreno_saxpy --target-accelerator adreno-x1`.
+
+Routes 1 and 3 stand unchanged as native-driver and performance options; what
+changed is that they are no longer required for correctness.
