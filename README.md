@@ -106,6 +106,72 @@ Full stdlib test census, native Windows ARM64:
 failures are the current work; see [PORT-JOURNAL.md](PORT-JOURNAL.md) for the
 running record, which is where the real detail lives.
 
+### What works, and what does not
+
+| | State |
+| --- | --- |
+| `mojo build` (AOT) | **works** — produces a running native ARM64 PE/COFF binary |
+| `mojo run` / REPL (JIT) | **cannot work** — LLVM has no COFF/ARM64 JITLink backend |
+| native CPU target | **broken** — `oryon-1` crashes the compiler, see below |
+| standalone driver | works only with two environment overrides, see below |
+
+Two defects had to be fixed before any Mojo program could be compiled and run on
+this platform. The COFF machine type was hardcoded to `/machine:X64` — carrying
+upstream's comment *"Mojo only supports X86_64 COFF right now"* — so the linker
+was handed ARM64 objects and told they were x86-64. With that derived from the
+target triple, the link reached symbol resolution and failed on `write` and
+`dup`: the stdlib's FFI calls POSIX names that the MSVC CRT exports
+underscore-prefixed, and `oldnames.lib` supplies the aliases that `cl.exe` would
+normally request through a `/DEFAULTLIB` directive Mojo never emits.
+
+Three gaps remain worked around rather than fixed:
+
+- **The compiler cannot target this machine's CPU.** `oryon-1` — the actual
+  Snapdragon X core — hits an assertion in LLVM's AArch64 scheduling model
+  (`TargetSchedule.cpp:227`, "incomplete machine model") and aborts codegen
+  outright. Everything below was compiled for `neoverse-n1` instead. Both are
+  ARMv8-A AArch64 and neither has SVE, so the substitution is sound and the code
+  is correct and native — but it is scheduled for a narrower core than the one
+  running it. A compiler that crashes on its own host CPU is a defect, not a
+  footnote, and it is the next thing to fix.
+- **The compiler_rt default path is Linux-shaped**
+  (`lib/libKGENCompilerRTShared.so`), so `MODULAR_MOJO_MAX_COMPILERRT_PATH` must
+  be set for a standalone invocation. Bazel-driven builds resolve it via runfiles
+  and are unaffected.
+- **The linker driver must be named explicitly** through
+  `MODULAR_MOJO_MAX_LINKER_DRIVER`, since the driver emits MSVC-style flags and
+  looks for `link.exe` on PATH.
+
+### First benchmarks
+
+Six programs, transliterated line-for-line into Mojo, C and Python, run on one
+Snapdragon X desktop. C is clang 22.1.4 at `-O3` — the same LLVM version Mojo
+itself uses — and both were given the same `-mcpu`. Times in milliseconds,
+in-process, excluding startup.
+
+| Benchmark | Mojo | C | CPython 3.12 | vs C |
+| --- | --- | --- | --- | --- |
+| fib30 · recursion | 2 | 2 | 165 | 1.00× |
+| mandelbrot · float | 21 | 19 | 1157 | 1.11× |
+| collatz · int div | 70 | 24 | 2284 | 2.92× |
+| sieve5m · memory | 27 | 13 | 1167 | 2.08× |
+| matmul256 · cache | 6 | 3 | 2277 | 2.00× |
+| qsort1m · branchy | 77 | 67 | 2478 | 1.15× |
+| **geometric mean** | | | | **1.58×** |
+
+Mojo comes out around **65× faster than CPython and 1.6× slower than C**. Only
+the second number means anything: beating a bytecode interpreter by two orders of
+magnitude is the entry fee for any compiled language, not a result worth
+reporting. The spread against C — 1.0× on pure call overhead, 2.9× on a tight
+integer-division loop — is where the actual information is.
+
+Caveats that matter before anyone quotes these: the CPU target is wrong for both
+languages (above); `fib30` and `matmul256` are near timer resolution; mandelbrot
+is numerically chaotic and all three languages return slightly different counts,
+so it measures speed and not correctness; and none of Mojo's actual selling
+points — SIMD, `parallelize`, GPU — are exercised at all. This is scalar
+single-threaded codegen, the part Mojo shares with every other LLVM language.
+
 ### Building
 
 Requires Windows 11 ARM64, Visual Studio Build Tools (for the MSVC sysroot), and
@@ -136,8 +202,10 @@ as found in the source tree during this port.*
 
 Mojo is a systems programming language wearing Python's syntax. Functions,
 structs, traits, and generics compile to native code with no interpreter and no
-GC; ownership and borrow semantics do the memory management, and Python-style
-`def` coexists with systems-style `fn`. It was built by Modular as the language
+GC, and ownership and borrow semantics do the memory management. Older writing
+about Mojo describes a Python-style `def` coexisting with a systems-style `fn`;
+that is no longer true at this version, which rejects `fn` with *"'fn' has been
+removed; use 'def' instead"*. It was built by Modular as the language
 for writing AI kernels — code that must run on CPUs, GPUs, and accelerators from
 one source — and that origin explains its two defining traits.
 
