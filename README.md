@@ -409,6 +409,59 @@ a long path resolves straight back to it.
 .\bazelw.cmd build //KGEN/tools/mojo:mojo
 ```
 
+### Bazel
+
+Bazel sounds like it just arrived from hell, and acts like it. Building this
+tree on a little Snapdragon with the hungry Bazel was a dire experience, made
+workable only with a lot of effort — every item below was learned by losing an
+afternoon to it, and every one is invisible until it has already cost you the
+afternoon.
+
+- **It zipped a Python interpreter into every test.** Windows Bazel assumes
+  symlinks are unavailable, so instead of a runfiles tree each of ~200 test
+  targets got a self-extracting zip of its entire runfiles closure — 122 MB
+  and 2,540 files *each*, including the hermetic CPython and its OpenSSL
+  debug symbols, at about two minutes per target. `--build_python_zip=false`
+  plus `--enable_runfiles` plus Developer Mode plus
+  `startup --windows_enable_symlinks` deleted the whole category and took the
+  action graph from 11,770 actions to ~3,500. All four are required at once.
+- **It filled the disk twice before that was understood.** A tree of
+  copies-instead-of-symlinks is quiet right up until the volume is full.
+- **Defender ate half the build.** Real-time protection scans every `.obj`,
+  `.lib` and `.pdb` as it is written — and the natural exclusion,
+  `C:\projects`, does nothing, because essentially all build I/O happens
+  under the output base in `_bazel_<user>`. With the right exclusion the
+  build sustains ~160 actions/min on eight cores; without it, about half.
+- **Upstream's default is a debug LLVM.** `--compilation_mode=dbg` for every
+  developer build means a full-debug LLVM inside `mojo.exe`: 5–10× slower to
+  produce, slower to run, and with LLVM's own assertions enabled — one of
+  which aborted the compiler during tests and masqueraded as a port bug for
+  a day.
+- **The output base cannot be moved after the fact.** Bazel canonicalises
+  it, so a junction pointing at a shorter path resolves straight back to the
+  long one, and Windows' 260-character path limit then breaks things as deep
+  and unrelated as Python's `_multiprocessing.pyd` refusing to load inside
+  test runfiles. Choose a short `--output_base` before the first build;
+  there is no second chance without rebuilding the world.
+- **Git Bash mangles its labels.** MSYS path conversion rewrites `//KGEN`
+  into a filesystem path mid-command; `MSYS2_ARG_CONV_EXCL` or the `.cmd`
+  wrapper is mandatory, and `bazelisk` needs `tools/bazel.bat` to be found
+  at all.
+- **`build:windows` silently does not override.**
+  `--enable_platform_specific_config` expands the platform section as if it
+  were at the *start* of the command line, so any unconditional flag later
+  in the same file outranks it. An override that looks correct, parses
+  correctly, and does nothing.
+- **The action cache is the only friend it has.** With the configuration
+  finally stable, the disk cache (60 GB cap) and the discipline of never
+  running `bazel clean` are what make the tree livable: the output base is
+  frequently the only copy of work that costs an hour to reproduce.
+
+None of this is Snapdragon-specific in cause — it is Windows-shaped neglect —
+but on eight Oryon cores with 32 GB, mistakes a build farm shrugs off each
+cost this machine an hour. The full running record, with the exact settings,
+is in [PORT-JOURNAL.md](PORT-JOURNAL.md).
+
 ---
 
 # Anatomy of Mojo
