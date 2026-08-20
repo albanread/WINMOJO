@@ -57,7 +57,7 @@ static const char *KSRC =
 
 #define N 4096
 
-int main(void) {
+int main(int argc, char **argv) {
     HMODULE h = LoadLibraryA("dragonrt.dll");
     if (!h) { printf("cannot load dragonrt.dll (%lu)\n", GetLastError()); return 1; }
 
@@ -158,6 +158,70 @@ int main(void) {
     DB_release(dx); DB_release(dy); DB_release(dout);
     DC_release(ctx);
     free(hx); free(hy); free(hout);
+
+    /* Optional: argv[1] = a .spv module. Drives it through loadFunction the
+     * way a Mojo binary does - including the runtime's kernel-arg storage
+     * bridge - then launches the saxpy shape and verifies numerically. */
+    if (argc > 1) {
+        FILE *f = fopen(argv[1], "rb");
+        if (!f) { printf("cannot open %s\n", argv[1]); return 1; }
+        fseek(f, 0, SEEK_END);
+        long len = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        char *spv = malloc(len);
+        fread(spv, 1, (size_t)len, f);
+        fclose(f);
+
+        /* Entry-point name straight from the module's OpEntryPoint. */
+        char entry[512] = {0};
+        const unsigned *w = (const unsigned *)spv;
+        long nw = len / 4;
+        for (long i = 5; i < nw;) {
+            unsigned wc = w[i] >> 16, op = w[i] & 0xFFFFu;
+            if (!wc) break;
+            if (op == 15) {
+                const char *nm = (const char *)&w[i + 3];
+                strncpy(entry, nm, sizeof(entry) - 1);
+                break;
+            }
+            i += wc;
+        }
+        printf("\n[spv] %s (%ld bytes), entry '%.60s...'\n", argv[1], len, entry);
+
+        const void *ctx2 = NULL;
+        check("spv: DeviceContext_create", DC_create(&ctx2, "adreno", 0));
+        const void *fn2 = NULL;
+        check("spv: loadFunction(module)",
+              DC_loadFunction(&fn2, ctx2, "mojo_module", entry, spv, (size_t)len,
+                              0, "none", 3));
+        if (fn2) {
+            const void *bx = NULL, *by = NULL, *bo = NULL;
+            void *px2 = NULL, *py2 = NULL, *po2 = NULL;
+            check("spv: buffers", DC_createBuffer(&bx, &px2, ctx2, N, 4));
+            DC_createBuffer(&by, &py2, ctx2, N, 4);
+            DC_createBuffer(&bo, &po2, ctx2, N, 4);
+            float *hx2 = malloc(N * 4), *hy2 = malloc(N * 4), *ho2 = malloc(N * 4);
+            for (int i = 0; i < N; ++i) { hx2[i] = (float)i; hy2[i] = (float)(N - i); }
+            check("spv: HtoD", DC_HtoD(ctx2, bx, hx2));
+            DC_HtoD(ctx2, by, hy2);
+            float a2 = 2.5f;
+            void *m1 = px2, *m2 = py2, *m3 = po2;
+            void *args3[4] = {&m1, &m2, &m3, &a2};
+            uint64_t sz3[4] = {sizeof(void *), sizeof(void *), sizeof(void *), 4};
+            check("spv: launch",
+                  DC_launch(ctx2, fn2, N / 64, 1, 1, 64, 1, 1, 0, NULL, 0, args3,
+                            4, sz3));
+            check("spv: synchronize", DC_synchronize(ctx2));
+            check("spv: DtoH", DC_DtoH(ctx2, ho2, bo));
+            DC_synchronize(ctx2);
+            int bad2 = 0;
+            for (int i = 0; i < N; ++i)
+                if (fabsf(ho2[i] - (2.5f * hx2[i] + hy2[i])) > 1e-3f) ++bad2;
+            if (bad2) { printf("  [FAIL] spv verify: %d wrong\n", bad2); ++fails; }
+            else printf("  [ok]   spv verify: all %d elements correct\n", N);
+        }
+        DC_release(ctx2);
+    }
 
     printf("\n%s\n", fails ? "FAILURES" : "ALL PASS - the MAX device ABI works on Adreno");
     return fails ? 1 : 0;

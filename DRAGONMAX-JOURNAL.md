@@ -1224,3 +1224,82 @@ Also: their broken-then-fixed push (escapes collapsed in transit) is the same
 heredoc gremlin that bit this session twice today, including in the dump hook
 itself (a path separator arrived over-escaped; now a forward slash, which the
 CRT accepts). Sympathy extended; range after d05d899 is clean.
+
+---
+
+## 2026-08-20 — clCreateKernel -5: root cause found, verified, bridged
+
+Their "interaction, not a feature" conclusion was reasonable and wrong in the
+best way: it WAS a single feature — one that lives in the kernel's parameter
+types, the only place a stripping bisect structurally cannot reach, and a
+place every hand-built control module silently got right.
+
+### The decode that settled it
+
+`dragon/probe/spv_tool.py` (the promised stripper's front half: full annotated
+decoder + structural checks) renders the 2,096-byte module completely. The
+smoking lines:
+
+```
+%5 = OpTypeArray  i8 x 4
+%6 = OpTypePointer Function %5            <-- the kernel argument type
+%9 = OpTypeFunction void(%6, %6, %6, float)
+```
+
+**The kernel's three buffer arguments are Function-storage pointers** (to an
+i8[4] placeholder — opaque-pointer residue). Kernel-flavor SPIR-V requires
+kernel pointer args in CrossWorkgroup/Workgroup/UniformConstant/Generic;
+Function storage is invalid as an argument and unmappable by clSetKernelArg.
+Provenance is clean: Mojo's `UnsafePointer` carries LLVM addrspace(0), and the
+LLVM SPIR-V backend maps AS0 → Function. The address space was lost at the
+kernel boundary. Every hand-built probe used CrossWorkgroup, as anyone
+hand-writing a kernel would — which is exactly why five shapes passed.
+
+### The experiment
+
+| Module | create | launch | verify |
+|---|---|---|---|
+| original (their capture, byte-exact) | **-5** | — | — |
+| same module, TWO WORDS changed (`Function`→`CrossWorkgroup` on the two `OpTypePointer`s) | ok | ok | **4096/4096 correct** |
+
+That patched run is the first Mojo-compiled kernel to execute correctly on
+this Adreno — 444-char mangled name, v3i32 builtins, OpBitcasts and all.
+Which also settles two side-questions:
+
+- **The v3i32 builtins are downgraded from suspect to note**: the verified
+  output requires correct per-element global indices, so Mesa's builtin
+  lowering handles the 32-bit form fine. Off-flavor, harmless.
+- **CL_PROGRAM_NUM_KERNELS = 0 was half-honest all along**: a program whose
+  only kernel has invalid parameters genuinely contains zero creatable
+  kernels. (It also reads 0 for valid hand-built ones, so it stays useless as
+  a diagnostic — but it wasn't lying about THIS module.)
+
+### What landed
+
+1. **`spv_tool.py`** — decoder + checks; a new rule flags Function-storage
+   kernel params on sight, so this class of bug is now a one-command
+   diagnosis. (Also fixed my own opcode table: 124 is OpBitcast; the 121–124
+   block was off — their off-by-one confession had company.)
+2. **`spv_run.py`** — step-by-step loader/launcher for any .spv via
+   OpenCLOn12, with the entry name parsed from the module.
+3. **The dragonrt bridge (TEMPORARY)**: `loadFunction` rewrites
+   `OpTypePointer Function` → `CrossWorkgroup` in memory before ingestion.
+   Guarded — skipped entirely if the module declares any Function-storage
+   `OpVariable` (allocas share those types; today's kernels have none) —
+   and `DRAGONRT_NO_SPV_FIXUP=1` disables. The dump hook fires BEFORE the
+   bridge, so captured modules stay pristine. Delete when the compiler fix
+   lands.
+4. **ABI-layer proof**: `test_dragonrt.exe <module.spv>` now drives a real
+   module through `loadFunction` exactly as a Mojo binary does. The original,
+   unpatched capture: loadFunction ok, launch ok, **all 4096 verified**.
+
+### The compiler fix (theirs, precisely aimed)
+
+Kernel pointer parameters must reach the SPIR-V backend as **addrspace(1)**.
+The LLVM SPIR-V mapping is AS0→Function, AS1→CrossWorkgroup, AS4→Generic; the
+kernel-argument lowering (the same new path that marks SPIR_KERNEL and lowers
+`llvm.spv.*`) should force AS1 on pointer params for the spirv triple. When
+that lands, the bridge becomes dead code and should be deleted.
+
+Expected on their side after merging: their existing built binary re-run =
+**adreno_saxpy PASS**.

@@ -641,6 +641,44 @@ __declspec(dllexport) const char *AsyncRT_DeviceContext_loadFunction(
         }
     }
 
+    /* TEMPORARY BRIDGE (2026-08-20): the Mojo compiler currently emits kernel
+     * pointer parameters with Function storage class (LLVM addrspace(0) maps
+     * there), which is invalid for a kernel argument and makes clCreateKernel
+     * fail with -5. Until the compiler emits CrossWorkgroup (addrspace(1))
+     * params, rewrite the pointer types here. Root-cause analysis and the
+     * verifying experiment: DRAGONMAX-JOURNAL.md 2026-08-20; the checker rule
+     * lives in dragon/probe/spv_tool.py.
+     *
+     * Guard: skipped entirely if the module declares ANY Function-storage
+     * OpVariable (allocas share these pointer types; a blanket flip would
+     * corrupt them). Today's kernels have none. DRAGONRT_NO_SPV_FIXUP=1
+     * disables. Delete this block once the compiler fix lands. */
+    std::vector<uint32_t> fixedWords;
+    if (isSpirv && dataLen % 4 == 0 && !getenv("DRAGONRT_NO_SPV_FIXUP")) {
+        const uint32_t *w = reinterpret_cast<const uint32_t *>(data);
+        size_t nw = dataLen / 4;
+        bool hasFunctionVar = false;
+        for (size_t i = 5; i + 3 < nw;) {
+            uint32_t wc = w[i] >> 16, opc = w[i] & 0xFFFFu;
+            if (!wc) break;
+            if (opc == 59 && w[i + 3] == 7) { hasFunctionVar = true; break; }
+            i += wc;
+        }
+        if (!hasFunctionVar) {
+            for (size_t i = 5; i + 2 < nw;) {
+                uint32_t wc = w[i] >> 16, opc = w[i] & 0xFFFFu;
+                if (!wc) break;
+                if (opc == 32 && w[i + 2] == 7) {  /* OpTypePointer Function */
+                    if (fixedWords.empty()) fixedWords.assign(w, w + nw);
+                    fixedWords[i + 2] = 5;         /* -> CrossWorkgroup */
+                }
+                i += wc;
+            }
+            if (!fixedWords.empty())
+                data = reinterpret_cast<const char *>(fixedWords.data());
+        }
+    }
+
     if (isSpirv) {
         if (!c->ilCreate)
             return errf(
