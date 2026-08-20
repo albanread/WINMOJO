@@ -1700,10 +1700,19 @@ pointer with the stdlib's own `_fn_ptr_as_opaque`, the same machinery CPython's
 tp_dealloc callbacks ride. Inside the callback, Win32Module hits the process
 cache, which is what makes calling it from message context reasonable.
 
-The procedure is also the flicker fix. Flip-model DXGI sharing a window with
-GDI is a documented artifact -- DefWindowProcW erases and paints, DWM
-alternates surfaces -- and the cure is refusing WM_ERASEBKGND and answering
-WM_PAINT with ValidateRect alone, which no default-proc window can do.
+The procedure also keeps GDI off the window -- refusing WM_ERASEBKGND and
+answering WM_PAINT with ValidateRect alone, which no default-proc window can
+do.
+
+> **Correction.** This entry originally claimed that was the flicker fix. It
+> was not: the user reported the flicker unchanged. The actual cause was
+> flip-model `Present` unbinding the render target -- bound once before the
+> loop, every alternate Draw went into an unbound pipeline, and the display
+> ping-ponged between the image and undefined buffer contents. Reissuing
+> OMSetRenderTargets every frame fixed it, confirmed by screenshot: the set
+> sharp and still against a magenta field, "smooth as silk." Two lessons kept:
+> in flip model, per-frame state is per-frame -- and a plausible documented
+> artifact is not the same as the artifact on the screen.
 
 Verified by the only camera that counts: the demo ran on screen for 1,286
 seconds -- 77,166 frames, 60.002 fps against a refresh-rate-derived present

@@ -1,11 +1,13 @@
 # An animated Julia set in a pixel shader, from Mojo on Windows ARM64 -- now
 # with a real window procedure written in Mojo and a real message loop.
 #
-# The window procedure is the fix for the flicker the first version had:
-# mixing a flip-model swap chain with GDI is a documented artifact -- DWM
-# alternates between the GDI redirection surface and the DXGI frames -- and
-# DefWindowProcW paints. Refusing WM_ERASEBKGND and validating WM_PAINT keeps
-# GDI's hands off the window entirely.
+# The flicker the first versions had turned out to be flip-model Present
+# unbinding the render target: bound once before the loop, every alternate
+# Draw went into an unbound pipeline, and the display ping-ponged between the
+# image and undefined buffer contents. The binding is reissued per frame.
+# The Mojo window procedure below ALSO keeps GDI off the window (refusing
+# WM_ERASEBKGND, validating WM_PAINT without painting) -- correct and
+# necessary, but it was not the flicker; the diagnosis took two passes.
 #
 # Frame rate is locked to ~60 by syncing to the display's actual refresh rate
 # (read from DEVMODEW -- by field offset, without declaring the 272-byte
@@ -630,7 +632,11 @@ def main() raises:
         Pointer(to=viewport).unsafe_origin_cast[MutAnyOrigin](),
     )
 
-    com_method_of[
+    # Flip-model swap chains UNBIND the render target at Present -- rebinding
+    # once before the loop leaves every alternate frame drawing into nothing,
+    # which shows as hard flicker between the image and undefined buffer
+    # contents. The binding must be reissued every frame.
+    var set_targets = com_method_of[
         def (
             OpaquePointer[MutUntrackedOrigin],
             UInt32,
@@ -639,12 +645,7 @@ def main() raises:
         ) thin abi("C") -> NoneType,
         "ID3D11DeviceContext",
         "OMSetRenderTargets",
-    ](context)(
-        context,
-        UInt32(1),
-        Pointer(to=rtv_addr).unsafe_origin_cast[MutAnyOrigin](),
-        Int(0),
-    )
+    ](context)
 
     com_method_of[
         def (
@@ -749,6 +750,12 @@ def main() raises:
             params.unsafe_ptr().unsafe_origin_cast[MutAnyOrigin](),
             UInt32(0),
             UInt32(0),
+        )
+        set_targets(
+            context,
+            UInt32(1),
+            Pointer(to=rtv_addr).unsafe_origin_cast[MutAnyOrigin](),
+            Int(0),
         )
         draw(context, UInt32(3), UInt32(0))
         var phr = present(swapchain, UInt32(interval), UInt32(0))
