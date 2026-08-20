@@ -1569,3 +1569,88 @@ setting it on day one.
 | Developer Mode + `--windows_enable_symlinks` | before first build | runfiles trees are copied, ~1 GB per test target |
 | `LongPathsEnabled` | any time | a class of tests fails on file opens |
 | short `--output_base` | **before first build** | deep-path tests fail in the DLL loader, unfixably |
+
+---
+
+## Origins, or: three bugs that were one lie
+
+A COM write reported success while its out-parameter kept its sentinel. A
+window class failed to register with ERROR_INVALID_PARAMETER -- until debug
+prints were added, when it worked. A Direct3D descriptor failed the same way.
+Three symptoms, days apart in feel, one cause, and the cause was me telling
+the lifetime checker something false.
+
+Every failing site had the shape
+
+    Pointer(to=local).unsafe_origin_cast[MutUntrackedOrigin]()
+
+and the origin module's own docs state precisely what that cast asserts: an
+untracked origin "promises the reference aliases no value the compiler is
+managing." The promise was false -- the pointer aliased `local` -- so the
+compiler was entitled to hand the callee a temporary and never read it back.
+Sometimes it did, sometimes it did not, which is the worst possible failure
+mode: the COM out-param missed, an 80-byte RegisterClassExW struct missed
+until prints happened to force it into memory, and a 64-byte
+GlobalMemoryStatusEx in the minimal test landed. Undefined means undefined.
+
+The minimal test (examples/win32/structptr.mojo) puts the three idioms side
+by side against GlobalMemoryStatusEx, whose dwLength field is the same
+must-set-cbSize pattern as WNDCLASSEXW. The rules it establishes:
+
+1. **Variadic calls take the true origin, uncast.** `Pointer(to=local)`
+   straight into external_call or a _DLCallable -- the origin is inferred,
+   the aliasing is visible, the callee's writes land. This is what the
+   standard library itself does at every libc boundary, which is why it
+   never hits the bug.
+2. **Declared signatures spell Mojo-owned pointers over AnyOrigin.** There is
+   no implicit origin conversion, so the call site casts -- but to
+   `MutAnyOrigin`/`ImmutAnyOrigin`, which keep the aliasing ("might access
+   any memory value"), never to Untracked, which denies it.
+3. **Untracked is only for memory Windows hands us.** Interface pointers,
+   symbols, allocations from outside -- its documented purpose, and the one
+   place it was being used correctly all along.
+
+The wrong turn is worth dissecting. The first COM out-parameter failure was
+"fixed" by moving the value into a one-element List -- heap storage, address
+of its own -- which worked, and so became advice in _com.mojo. It treated
+the symptom: heap memory cannot be register-promoted, so the lie about
+aliasing happened to be survivable there. The advice is now replaced with
+the actual rule. Reading the documentation first would have been faster
+than three rounds of sentinel forensics; the stdlib's own call sites had
+the correct idiom the whole time.
+
+One more trap from the same stretch, different family:
+`TrivialRegisterPassable` on an 80-byte struct does not fail to compile. It
+silently lays fields out somewhere other than where a pointer-taking callee
+expects them -- cbSize read back as garbage, lpfnWndProc as 18. Big structs
+passed to Windows by pointer are `Copyable, Movable`, nothing more.
+
+### The window, and the true test
+
+With the rules applied, the full chain runs, and cleanly -- no casts on the
+variadic path at all:
+
+    window    -> 1443480 (class atom 49766)
+    D3D11CreateDeviceAndSwapChain hr = 0  feature level = 45056
+    presented 180 frames
+
+RegisterClassExW, CreateWindowExW, a D3D11 device on the Adreno at feature
+level 11.0, the back buffer fetched through IDXGISwapChain::GetBuffer at a
+vtable slot the compiler queried from the metadata, a render target view,
+and 180 vsynced frames of a teal-to-green fade. Confirmed by the only
+instrument that can tell "drew correctly" from "never drew": a person
+watching the screen go green.
+
+The same session settled what the abstraction costs. `--emit asm` on
+IUnknown::Release through the metadata-derived dispatcher:
+
+    ldr  x8, [x19]        ; vtable from *this
+    mov  x0, x19          ; this
+    ldr  x8, [x8, #16]    ; slot 2 * 8, an immediate
+    blr  x8
+
+Byte-for-byte what C++ emits for p->Release(). The SQLite query is gone --
+it became the #16. Zero cost, in the literal sense.
+
+Working examples preserved under examples/win32/: the idiom test, the
+metadata queries, and the Direct3D window.

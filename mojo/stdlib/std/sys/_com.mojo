@@ -75,20 +75,33 @@ def com_method_of[
 
 
 # ===----------------------------------------------------------------------=== #
-# A note on out-parameters, which is where this is easy to get wrong
+# A note on origins, which is where this is easy to get wrong
 #
-# COM returns almost everything through out-parameters, and taking a pointer to
-# a local for one does not reliably work:
+# Interface pointers use OpaquePointer[MutUntrackedOrigin], and that is the
+# documented use of an untracked origin: memory from outside the Mojo program,
+# aliasing no value the compiler manages.
 #
-#     var written: UInt32 = 0
-#     write(this, buf, n, Pointer(to=written).unsafe_origin_cast[...]())
+# Everything ELSE a COM method touches -- out-parameters, descriptor structs,
+# buffers -- IS Mojo-owned memory, and casting its pointer to an untracked
+# origin tells the lifetime checker the pointer does not alias it. The
+# compiler is then free to hand the callee a temporary: the call succeeds, the
+# write lands nowhere, and the local keeps its old value. It can also appear
+# to work, which is worse. This was found by sentinel: a counter set to 999
+# survived a Write that reported success.
 #
-# The callee writes, the call reports success, and `written` is unchanged --
-# the pointer addressed a temporary. It is silent, and it looks exactly like a
-# method that returned zero. Use storage whose address is its own:
+# So a Sig's pointer parameters are spelled over AnyOrigin, which keeps the
+# aliasing ("might access any memory value"):
 #
-#     var written = List[UInt32](length=1, fill=0)
-#     write(this, buf, n, written.unsafe_ptr().unsafe_origin_cast[...]())
+#     def (
+#         OpaquePointer[MutUntrackedOrigin],      # this -- from Windows
+#         Pointer[UInt32, MutAnyOrigin],          # out-param -- ours
+#     ) thin abi("C") -> c_int
 #
-# and read `written[0]` afterwards.
+# and a call site casts to the SAME:
+#
+#     write(this, ..., Pointer(to=written).unsafe_origin_cast[MutAnyOrigin]())
+#
+# Variadic calls (external_call, _DLCallable) need no cast at all: pass
+# Pointer(to=local) and the true origin is inferred, which is what the
+# standard library itself does at every libc boundary.
 # ===----------------------------------------------------------------------=== #
