@@ -295,16 +295,31 @@ cc_args(
         "-L{vc_lib}",
         "-L{sdk_lib_ucrt}",
         "-L{sdk_lib_um}",
+        # compiler-rt's builtins live outside the MSVC sysroot, in the clang
+        # distribution. clang adds them to its own links; Mojo drives the
+        # linker itself and inherits only what is stated here. Without them
+        # __divti3 and __modti3 -- 128-bit signed division and modulo, which
+        # the standard library reaches whenever an Int128 is formatted -- come
+        # up undefined.
+        #
+        # Named as a direct input rather than requested through /DEFAULTLIB: a
+        # default library is only consulted through the linker's search path,
+        # and that lookup did not resolve these even with the containing
+        # directory on -L. An explicit path removes the search from the
+        # equation.
+        "{clang_builtins_lib}/lib/clang/22/lib/windows/clang_rt.builtins-aarch64.lib",
     ],
     data = [
         "@sysroot-windows-arm64//vc_lib:files",
         "@sysroot-windows-arm64//sdk_lib_ucrt:files",
         "@sysroot-windows-arm64//sdk_lib_um:files",
+        "@clang-windows-arm64//:builtins_lib_files",
     ],
     format = {
         "vc_lib": "@sysroot-windows-arm64//vc_lib:dir",
         "sdk_lib_ucrt": "@sysroot-windows-arm64//sdk_lib_ucrt:dir",
         "sdk_lib_um": "@sysroot-windows-arm64//sdk_lib_um:dir",
+        "clang_builtins_lib": "@clang-windows-arm64//:builtins_lib_dir",
     },
 )
 

@@ -52,6 +52,31 @@ directory(
     srcs = [":resource_directory_filegroup"],
 )
 
+# compiler-rt's builtins, as a search path.
+#
+# LLVM emits calls to these for arithmetic no instruction implements: __divti3
+# and __modti3 are 128-bit signed division and modulo, which the standard
+# library reaches through Int128/UInt128. The clang driver adds this library to
+# its own link jobs, but `mojo build` drives the linker directly and inherits
+# only what the toolchain states, so the directory has to be a real -L entry.
+# `directory` resolves to the repository root here rather than to the nested
+# path, so the consumer appends lib/clang/22/lib/windows itself. The version is
+# spelled out there exactly as it is for :include above.
+filegroup(
+    name = "root_filegroup",
+    srcs = ["lib/clang/22/lib/windows"],
+)
+
+directory(
+    name = "builtins_lib_dir",
+    srcs = [":root_filegroup"],
+)
+
+filegroup(
+    name = "builtins_lib_files",
+    srcs = glob(["lib/clang/*/lib/windows/clang_rt.builtins-*.lib"]),
+)
+
 filegroup(
     name = "bin",
     srcs = glob(["bin/**"]),
