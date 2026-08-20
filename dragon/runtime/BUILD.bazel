@@ -1,3 +1,4 @@
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("//bazel:api.bzl", "modular_cc_library", "modular_cc_test")
 
 package(default_visibility = ["//visibility:public"])
@@ -27,4 +28,17 @@ modular_cc_test(
     tags = ["gpu"],
     target_compatible_with = ["@platforms//os:windows"],
     deps = [":dragonrt"],
+)
+
+# The same runtime as a DLL. Two consumers need this shape: test_dragonrt
+# LoadLibrary's "dragonrt.dll" (and has been failing with error 126 under
+# Bazel, which only built the static .lib), and `mojo run -Xlinker
+# dragonrt.dll` loads it into the JIT session, where a static archive is
+# invisible. Naming the target with the extension is Bazel's way of pinning
+# the output filename.
+cc_binary(
+    name = "dragonrt.dll",
+    srcs = ["dragonrt.cpp"],
+    linkshared = True,
+    target_compatible_with = ["@platforms//os:windows"],
 )

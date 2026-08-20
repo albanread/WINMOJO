@@ -1977,3 +1977,26 @@ too long" before lit starts. That is the parked MAX_PATH problem wearing a
 test-failure costume, and it means the census's failure count mixes
 path-length casualties with real ones. The rerun, when it happens, needs
 the short output base first.
+
+### The favourite, JIT'd
+
+`./examples/win32/run.sh adreno_mandelbrot` now runs the windowed Mandelbrot
+straight from source: RuntimeDyld links the ARM64 COFF objects in-process,
+the SPIR-V kernel goes to the Adreno, `AsyncRT_*` comes from `dragonrt.dll`
+via `-Xlinker` — which is `mojo run`'s spelling for "load this into the JIT
+session" — and D3D11 presents. No linker, no .exe, and the window is
+indistinguishable from the AOT one.
+
+Measured to settle a perception: 20 seconds of animation each, same source —
+**AOT 59 fps, JIT 59 fps**. The frame loop locks to vsync either way; the
+apparent speed difference was the zoom cycle's phase (early frames crawl,
+deep frames race). The real JIT cost is startup: the first run pays the full
+compile before the window appears; a warm re-run reached it in 2 s.
+
+Two pieces landed to make the one-liner work: `//dragon/runtime:dragonrt.dll`
+(a `cc_binary` linkshared target — which is also the DLL `test_dragonrt` has
+been failing to LoadLibrary under Bazel, error 126), and `run.sh`, which
+reuses build.sh's environment and adds `--target-accelerator` plus the DLL
+automatically when the source mentions the GPU. Also fixed in passing:
+`winstr_smoke.mojo` still imported `std.sys._windows_core`, the module's
+address before it became the `std.windows` package.

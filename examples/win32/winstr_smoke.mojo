@@ -1,7 +1,7 @@
 # Round-trips the wide-string helpers and decodes a few error codes.
 # Small on purpose: everything else in the Windows surface stands on these.
 
-from std.sys._windows_core import (
+from std.windows import (
     Handle,
     WideString,
     error_message,
