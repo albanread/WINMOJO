@@ -174,9 +174,16 @@ single-threaded codegen, the part Mojo shares with every other LLVM language.
 
 ### Building
 
-Requires Windows 11 ARM64, Visual Studio Build Tools (for the MSVC sysroot), and
-**Developer Mode enabled** — that last one is not optional, and the journal entry
-*`ln -s` lies* explains why it is load-bearing.
+Requires Windows 11 ARM64 and Visual Studio Build Tools (for the MSVC sysroot).
+
+Three machine settings decide whether this works, none of them is discoverable
+from an error message, and **one of them cannot be changed after the first
+build**. Read [Three machine settings](PORT-JOURNAL.md) before building:
+Developer Mode plus `startup --windows_enable_symlinks` (without both, runfiles
+trees are written as copies at about a gigabyte per test target),
+`LongPathsEnabled`, and a short `--output_base` — that last one has to be chosen
+up front, because Bazel canonicalises the output base and a junction pointing at
+a long path resolves straight back to it.
 
 ```bash
 .\bazelw.cmd build //KGEN/tools/mojo:mojo

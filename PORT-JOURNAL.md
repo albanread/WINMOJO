@@ -1465,3 +1465,107 @@ out `test_quick_bench`, it is unrelated to any of this, and it is the next
 thing in the way.
 
 Across os, subprocess and bit these changes took failures from twelve to one.
+
+---
+
+## Three machine settings, and one that cannot be worked around
+
+If you are porting this to your own machine, read this section before you build
+anything. Three Windows settings decide whether the build and its tests work at
+all, none of them is discoverable from an error message, and one of them has to
+be right *before* the first build because it cannot be changed afterwards
+without throwing the build away.
+
+### 1. Developer Mode — required, and not sufficient on its own
+
+```
+New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock' -Name AllowDevelopmentWithoutDevLicense -Value 1 -PropertyType DWord -Force
+```
+
+Grants unprivileged symlink creation. Two things need it: Bazel's runfiles
+trees, which are otherwise written as real file copies at roughly a gigabyte
+per test target, and the standard library's `symlink()`, which passes
+`SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE`.
+
+It takes effect at logon, so sign out and back in — and Bazel's server must be
+restarted too, since it keeps the privileges it started with.
+
+**Developer Mode alone does not make Bazel emit symlinks.** It also needs a
+*startup* option, which is easy to miss because every other knob here is a
+`build` option:
+
+```
+startup --windows_enable_symlinks
+```
+
+Do not test for symlink support with `ln -s` under Git Bash. MSYS silently
+copies when it cannot link, so the probe always succeeds and proves nothing.
+That false positive filled a 475 GB disk twice here. Use Python's
+`os.symlink()`, which passes the same flag Bazel does, and then check the result
+by measuring a materialized tree: `find <tree> -type l | wc -l` against
+`-type f`.
+
+### 2. Long paths — worth setting, but it does less than it appears
+
+```
+New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value 1 -PropertyType DWord -Force
+```
+
+No reboot needed; new processes pick it up, though the Bazel server must be
+restarted.
+
+This lifts the 260-character limit for *file opens*, and it does work — Python
+went from reporting a 260-character path as non-existent to opening it happily.
+
+**It does not lift the limit for the DLL loader.** `LoadLibrary` enforces
+MAX_PATH whatever the registry says, so anything that imports a native
+extension from a deep runfiles path still fails with
+
+```
+ImportError: DLL load failed while importing _multiprocessing:
+The filename or extension is too long.
+```
+
+Setting it is still correct — it removes one whole class of failure — but it
+moves the wall rather than removing it. Expect the count to go *down* slightly
+when you enable it: tests that used to fail early now run far enough to fail on
+something real, which is a truer number rather than a worse state.
+
+### 3. A short output base — and this one cannot be retrofitted
+
+The remaining MAX_PATH failures are all runfiles paths, and the only fix is
+fewer characters. The default output base here is
+`C:\users\alban\_bazel_alban\rme75s5o`, 36 characters before the build even
+starts; `C:\b` would give 32 of them back and clear every remaining case.
+
+The obvious dodge does not work. A junction is not a shortcut:
+
+```
+mklink /J C:\b C:\users\<user>\_bazel_<user>\<hash>
+```
+
+creates a perfectly good alias, and Bazel will happily build through it —
+9,552 action cache hits, nothing rebuilt — but every path it *hands out* is
+still the long one, because Bazel canonicalises the output base at startup and
+resolves the junction away. The test logs show the real path, and the DLL
+loader fails exactly as before.
+
+So the output base has to be genuinely short, which means choosing it before
+the first build:
+
+```
+startup --output_base=C:/b
+```
+
+Changing it later means a fresh output base and repopulating from the disk
+cache. That is much cheaper than it sounds when the cache is warm — 60 GB and
+14,637 entries here — but it is not free, and it is entirely avoidable by
+setting it on day one.
+
+### The short version
+
+| Setting | When | If you skip it |
+| --- | --- | --- |
+| Developer Mode + `--windows_enable_symlinks` | before first build | runfiles trees are copied, ~1 GB per test target |
+| `LongPathsEnabled` | any time | a class of tests fails on file opens |
+| short `--output_base` | **before first build** | deep-path tests fail in the DLL loader, unfixably |
