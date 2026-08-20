@@ -327,6 +327,70 @@ One gap, named honestly: the metadata stores 5,837 GUID-valued constants
 still transcribed from `shlobj.h`. COM interface IIDs are fine — those come
 from a different column, which is populated.
 
+### Mojo on the GPU
+
+![The Mandelbrot set, every pixel computed by a Mojo kernel on the Adreno X1-45](docs/images/mandelbrot.png)
+
+This is the evidence. That window is zooming into seahorse valley, and every
+pixel of every frame is computed by this Mojo kernel — compiled to SPIR-V,
+executed on the Snapdragon's Adreno X1-45 through OpenCL:
+
+```mojo
+def mandelbrot_kernel(
+    escape: Pointer[Float32, MutAnyOrigin],
+    center_x: Float32,
+    center_y: Float32,
+    scale: Float32,
+):
+    var index = block_idx.x * block_dim.x + thread_idx.x
+    if index < PIXELS:
+        var px = index % WIDTH
+        var py = index // WIDTH
+        var cx = center_x + (Float32(px) - Float32(WIDTH) * 0.5) * scale
+        var cy = center_y + (Float32(py) - Float32(HEIGHT) * 0.5) * scale
+
+        var zx = Float32(0)
+        var zy = Float32(0)
+        var n = 0
+        while n < MAX_ITER and zx * zx + zy * zy <= Float32(4):
+            var next_zx = zx * zx - zy * zy + cx
+            zy = Float32(2) * zx * zy + cy
+            zx = next_zx
+            n += 1
+
+        escape.unsafe_offset(index)[] = Float32(n)
+```
+
+That is standard Mojo GPU code — `block_idx`, `thread_idx`, `enqueue_function`
+— the same program you would write for an NVIDIA card. Nothing about the
+kernel knows it is running on a Snapdragon. The full demo is
+[examples/win32/adreno_mandelbrot.mojo](examples/win32/adreno_mandelbrot.mojo);
+the Julia demo above painted with an HLSL pixel shader, and this closes that
+era from the right direction: Direct3D is reduced to a texture upload and a
+fullscreen triangle, and the GPU language is Mojo.
+
+| 960×720, 512 max iterations, ~73M iterations/frame | per frame |
+| --- | --- |
+| **Adreno X1-45** — Mojo kernel via SPIR-V/OpenCL, including readback | **11–13 ms** |
+| Oryon CPU, one core — the identical scalar Mojo | 250 ms |
+
+The GPU and CPU results are compared before the window opens. Not for
+bit-exactness — escape time is chaotic near the set, where a one-ulp FMA
+difference legitimately moves a pixel from 512 iterations to 450 — but for
+exactness where chaos cannot excuse anything: low-count, locally-flat pixels,
+where wrong codegen would have nowhere to hide. Zero mismatches there.
+
+How this exists at all: Mojo has no Snapdragon target, and Qualcomm's OpenCL
+driver cannot ingest SPIR-V. The compiler side (a SPIR-V offload backend for
+`--target-accelerator adreno-x1`) and the runtime side (`dragonrt`, an
+implementation of Modular's unpublished `AsyncRT_*` device ABI over OpenCL,
+routed through Windows' OpenCLOn12 layer) come from
+[DragonMax](DRAGONMAX.md), this port's sister project, and the running record
+of how the last three stacked bugs fell — invalid kernel parameter address
+spaces, an `Optional[Pointer]` that never survived the C ABI, and a transfer
+path that was never coherent — is in
+[DRAGONMAX-JOURNAL.md](DRAGONMAX-JOURNAL.md).
+
 ### Building
 
 Requires Windows 11 ARM64 and Visual Studio Build Tools (for the MSVC sysroot).
@@ -495,6 +559,7 @@ codebase are not a packaging choice — they are undefined behaviour.
 | stdlib | Compiles to `std.mojoc` with warnings only — no source changes required. |
 | tests | 258 of 369 targets pass; 52 fail, 4 fail to build, 55 platform-skipped. |
 | Windows API | `std/windows/` — registry, shell folders, filesystem, console, system info, time, processes, clipboard — on metadata-derived layouts and constants. |
+| GPU | Mojo kernels compile to SPIR-V and execute on the Adreno X1-45 via `--target-accelerator adreno-x1`; Mandelbrot at 11–13 ms/frame vs 250 ms on one CPU core. |
 | next | Drive down the failures, then performance against CPython. |
 
 > **Reading the tree yourself?** Start at `KGEN/tools/mojo/mojo.cpp` and follow a
