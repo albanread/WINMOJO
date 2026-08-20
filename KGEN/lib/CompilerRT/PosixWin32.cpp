@@ -24,6 +24,8 @@
 
 #include "Support/SymbolExport.h"
 
+#include "llvm/ADT/StringMap.h"
+
 #include <windows.h>
 
 #include <errno.h>
@@ -676,6 +678,67 @@ COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT int kill(int pid, int sig) {
     return -1;
   }
   return 0;
+}
+
+//===----------------------------------------------------------------------===//
+// Module cache
+//===----------------------------------------------------------------------===//
+//
+// Win32 bindings resolve entry points at run time, and loading a DLL per call
+// site -- worse, per call -- is both slow and semantically wrong, since an
+// OwnedDLHandle frees the library on drop while Windows may still hold
+// callbacks into it. The cache loads each module once and never frees it,
+// which for user32/kernel32/d3d11 is also what any Windows process does
+// anyway. Mojo has no mutable-global idiom in this snapshot, so the statics
+// live here, where they are one lock and one map.
+
+namespace {
+
+std::mutex &moduleCacheMutex() {
+  static std::mutex m;
+  return m;
+}
+
+llvm::StringMap<HMODULE> &moduleCache() {
+  static llvm::StringMap<HMODULE> cache;
+  return cache;
+}
+
+} // namespace
+
+/// Return the named module, loading it on first use and caching it for the
+/// life of the process. Returns null if the module cannot be loaded; the
+/// failure is also cached, so a misspelled name does not retry the loader on
+/// every call.
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void *
+KGEN_CompilerRT_Win32Module(const char *name) {
+  if (!name)
+    return nullptr;
+
+  std::lock_guard<std::mutex> lock(moduleCacheMutex());
+  auto it = moduleCache().find(name);
+  if (it != moduleCache().end())
+    return it->second;
+
+  std::wstring wide;
+  HMODULE module = nullptr;
+  if (widen(name, wide)) {
+    // Already-loaded modules resolve without touching the loader path.
+    module = ::GetModuleHandleW(wide.c_str());
+    if (!module)
+      module = ::LoadLibraryW(wide.c_str());
+  }
+  moduleCache()[name] = module;
+  return module;
+}
+
+/// GetProcAddress against a cached module handle.
+COMPILERRT_EXPORT COMPILERRT_VISIBILITY_EXPORT void *
+KGEN_CompilerRT_Win32Symbol(void *module, const char *name) {
+  if (!module || !name)
+    return nullptr;
+  return reinterpret_cast<void *>(
+      ::GetProcAddress(static_cast<HMODULE>(module), name));
 }
 
 #endif // _WIN32
