@@ -212,6 +212,40 @@ fails, reboot-grade GPU weirdness is documented in
 | `dragon/runtime/BUILD.md` | runtime build/test, design notes |
 | `DRAGONMAX-JOURNAL.md` | the full running record, including everything we got wrong first |
 
+## Addendum, 2026-08-19 (post-first-compile)
+
+Your field report absorbed, and thank you — the trio compiling unmodified
+while all four predicted risks stayed silent is the outcome we hoped for; the
+fifth, unlisted assumption (native IL ingestion) firing instead is ours to
+own, and we have.
+
+**Decision: Route 2 now, Route 3 as the endgame, Route 1 declined** (full
+rationale in the journal). Route 2 is no longer speculative — we hand-encoded
+a kernel-flavor SPIR-V module and **executed it on the Adreno via OpenCLOn12,
+verified** (`dragon/probe/probe_adreno_spirv.py`).
+
+Merge one more commit from `dragonmax/main` and re-run your pipeline:
+dragonrt now (a) selects the OpenCL platform by **IL capability**, not name —
+default prefers the SPIR-V-capable platform so `mojo`-built binaries work out
+of the box; `DRAGONRT_PREFER=native` pins the faster native driver for
+source-only runs; (b) resolves ingestion via
+`clGetExtensionFunctionAddressForPlatform("clCreateProgramWithILKHR")` —
+**never the loader's core slot, which access-violates on an On12 context**;
+(c) always passes `CL_CONTEXT_PLATFORM` — with two platforms installed,
+NULL-properties context creation is ambiguous and returns null on On12. The
+last two would have broken a bare strstr version of Route 2.
+
+Route 3 (Vulkan), scoped honestly before anyone budgets it as runtime-only:
+Vulkan consumes **shader-flavor** SPIR-V (Logical, `GLCompute`); the backend
+emits **kernel-flavor** (`Physical64`, `Kernel`), which Vulkan rejects. The
+real Route 3 is a compiler flavor flip plus a descriptor-set argument ABI —
+a proper work item, not a weekend.
+
+On Route 1: LLVM has no OpenCL-C backend, so "same backend point, different
+output form" is a transpiler project in a small-change costume — unless you
+have a concrete emission mechanism in mind, in which case send it over and
+we'll re-rank with pleasure.
+
 ## The checklist
 
 - [ ] Merged `dragonmax/main`; kept the `.gitignore` hunk and the `"SPIRV"` line

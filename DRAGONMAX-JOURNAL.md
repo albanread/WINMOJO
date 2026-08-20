@@ -1103,3 +1103,65 @@ B0–B2 need only an *analysable* Bazel, which WINMOJO's G3 already achieved —
 the ladder can start before KGEN builds.
 
 Not started, per instruction. The go decision is the user's.
+
+---
+
+## 2026-08-19 — first compile verdict in; the IL assumption fires; Route 2 landed
+
+The compiler team's field report: **the trio compiled unmodified** — all four
+bounce-back risks silent — `mojo build --target-accelerator adreno-x1` emits
+real SPIR-V, dragonrt links and runs, and kernel load dies because **the
+native QUALCOMM driver cannot ingest SPIR-V at all**. Empty
+`CL_DEVICE_IL_VERSION`, no `cl_khr_il_program`. The fifth unmeasured
+assumption of this project, and this one was mine: the 30-second IL query was
+never run. OpenCL 3.0 makes IL optional, and Qualcomm opted out.
+
+Verified independently and extended (`dragon/probe/probe_adreno_spirv.py`),
+including the question nobody had answered — does OpenCLOn12 actually
+*execute* kernel-flavor SPIR-V, or merely advertise it:
+
+| Platform | IL advertised | Hand-encoded SPIR-V |
+|---|---|---|
+| QUALCOMM Snapdragon(TM) | none | — |
+| OpenCLOn12 | SPIR-V_1.0 | **EXECUTES, verified (42 read back)** |
+
+The probe hand-encodes a minimal OpenCL-flavor module (Physical64, Kernel,
+`*p = 42`) so the test has no toolchain dependencies and the words are
+auditable in the file.
+
+Two traps found on the way, either of which would have broken a naive
+"one strstr" Route 2:
+
+1. **The loader's core `clCreateProgramWithIL` slot access-violates** (read at
+   offset 0x38 in the dispatch) on an OpenCLOn12 context. Only the
+   per-platform `clCreateProgramWithILKHR` pointer from
+   `clGetExtensionFunctionAddressForPlatform` is safe.
+2. **`clCreateContext(NULL props)` is ambiguous with two platforms installed**
+   and returns null on On12. dragonrt had this latent bug since W2 — it worked
+   on the native platform by luck. `CL_CONTEXT_PLATFORM` is now always passed.
+
+### The decision (the team asked for our call)
+
+**Route 2 now — and it is landed, not recommended.** dragonrt selects the
+platform by IL *capability*: default prefers the SPIR-V-capable platform so
+Mojo binaries work out of the box; `DRAGONRT_PREFER=native` pins the native
+driver for source-only work (and for measuring the D3D12 tax). A future native
+driver that gains IL wins automatically because native platforms sort first.
+Both policies pass the full ABI test. The doctrine survives intact: selection
+by platform capability, never by device name — the trench-coat platform turns
+out to be the bridge, which is an irony we will simply have to live with.
+
+**Route 3 (Vulkan) is the endgame, scoped honestly:** Vulkan consumes
+shader-flavor SPIR-V; the backend emits kernel-flavor. The real item is a
+compiler flavor flip plus a descriptor-set kernel ABI — compiler *and* runtime
+work. Queued behind a green adreno_saxpy, prioritised by the tax measurement.
+
+**Route 1 (emit OpenCL C) declined:** LLVM has no OpenCL-C backend; producing
+compilable OpenCL C from post-elaboration LLVM IR is a transpiler project
+wearing a small-change costume — the third such costume this week. Standing
+invitation to the team: a concrete emission mechanism reverses this.
+
+### Next measurement
+
+The D3D12 tax: same kernel, both platforms, `DRAGONRT_PREFER` as the switch.
+Its size decides how urgent Route 3 is. Then: adreno_saxpy should PASS.

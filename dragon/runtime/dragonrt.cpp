@@ -23,8 +23,10 @@
  *     both fails to legalize.
  */
 
+#include <algorithm>
 #include <atomic>
 #include <cstdarg>
+#include <cstdlib>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -96,6 +98,7 @@ CLFN(cl_int, clEnqueueNDRangeKernel, cl_command_queue, cl_kernel, cl_uint,
      const size_t *, const size_t *, const size_t *, cl_uint, const cl_event *,
      cl_event *)
 CLFN(cl_int, clFinish, cl_command_queue)
+CLFN(void *, clGetExtensionFunctionAddressForPlatform, cl_platform_id, const char *)
 
 static bool g_clLoaded = false;
 
@@ -115,6 +118,7 @@ static bool loadCL() {
     GET(clSetKernelArg) GET(clEnqueueWriteBuffer) GET(clEnqueueReadBuffer)
     GET(clEnqueueCopyBuffer) GET(clEnqueueFillBuffer)
     GET(clEnqueueNDRangeKernel) GET(clFinish)
+    GET(clGetExtensionFunctionAddressForPlatform)
 #undef GET
     g_clLoaded = true;
     return true;
@@ -163,10 +167,20 @@ struct DragonFunction {
     DragonContext *ctx = nullptr;
 };
 
+/* Resolved per PLATFORM via clGetExtensionFunctionAddressForPlatform. The
+ * loader's core clCreateProgramWithIL slot ACCESS-VIOLATES on an OpenCLOn12
+ * context (measured 2026-08-19, read at offset 0x38 inside the dispatch);
+ * only the KHR extension pointer is safe. Never call the core symbol. */
+typedef cl_program(__stdcall *pfn_createProgramWithILKHR)(cl_context, const void *,
+                                                          size_t, cl_int *);
+
 struct DragonContext {
     std::atomic<int> rc{1};
     cl_context cl = nullptr;
     cl_device_id dev = nullptr;
+    cl_platform_id plat = nullptr;
+    std::string platName;
+    pfn_createProgramWithILKHR ilCreate = nullptr;
     DragonStream *defaultStream = nullptr;
     std::vector<DragonStream *> streams;
     std::mutex lock;
@@ -184,30 +198,91 @@ struct StringRefABI {
 
 /* ---- device selection ---------------------------------------------------
  * By PLATFORM, never by device name: OpenCLOn12 reports the same device string
- * as the native Qualcomm driver, so name matching can silently land on a D3D12
- * translation layer that is far slower.
+ * as the native Qualcomm driver, so name matching alone can land anywhere.
+ *
+ * Measured 2026-08-19 (probe_adreno_spirv.py): the native QUALCOMM platform
+ * has NO SPIR-V ingestion at all (empty CL_DEVICE_IL_VERSION, no
+ * cl_khr_il_program), while OpenCLOn12 ingests AND executes kernel-flavor
+ * SPIR-V on the same Adreno, via D3D12. So the two platforms split the
+ * capabilities: native = fastest for SOURCE, On12 = the only IL path today.
+ *
+ * Selection policy: prefer an IL-capable Adreno platform (the Mojo pipeline
+ * ships SPIR-V, which is this runtime's whole purpose), unless
+ * DRAGONRT_PREFER=native asks for the source-only native driver (useful for
+ * benchmarking the D3D12 tax). A native driver that gains IL in a future
+ * update wins automatically, because native platforms are scanned first.
  */
 
-static bool pickQualcomm(cl_platform_id *outP, cl_device_id *outD) {
+#define CL_DEVICE_IL_VERSION_QUERY 0x105B
+#define CL_DEVICE_EXTENSIONS_QUERY 0x1030
+
+static bool deviceHasIL(cl_device_id d) {
+    char il[128] = {0};
+    if (clGetDeviceInfo(d, CL_DEVICE_IL_VERSION_QUERY, sizeof(il), il, nullptr) ==
+            CL_SUCCESS &&
+        il[0])
+        return true;
+    size_t n = 0;
+    clGetDeviceInfo(d, CL_DEVICE_EXTENSIONS_QUERY, 0, nullptr, &n);
+    if (!n) return false;
+    std::string exts(n, '\0');
+    clGetDeviceInfo(d, CL_DEVICE_EXTENSIONS_QUERY, n, exts.data(), nullptr);
+    return exts.find("cl_khr_il_program") != std::string::npos;
+}
+
+static bool pickAdreno(cl_platform_id *outP, cl_device_id *outD, bool *outIL,
+                       std::string *outPlatName) {
     cl_uint np = 0;
     if (clGetPlatformIDs(0, nullptr, &np) != CL_SUCCESS || np == 0) return false;
     std::vector<cl_platform_id> ps(np);
     clGetPlatformIDs(np, ps.data(), nullptr);
+
+    struct Cand {
+        cl_platform_id p;
+        cl_device_id d;
+        bool il;
+        bool native;
+        std::string name;
+    };
+    std::vector<Cand> cands;
     for (cl_uint i = 0; i < np; ++i) {
         char nm[256] = {0};
         clGetPlatformInfo(ps[i], CL_PLATFORM_NAME, sizeof(nm), nm, nullptr);
-        if (!strstr(nm, "QUALCOMM")) continue;
         cl_uint nd = 0;
         if (clGetDeviceIDs(ps[i], CL_DEVICE_TYPE_ALL, 0, nullptr, &nd) != CL_SUCCESS ||
             nd == 0)
             continue;
         std::vector<cl_device_id> ds(nd);
         clGetDeviceIDs(ps[i], CL_DEVICE_TYPE_ALL, nd, ds.data(), nullptr);
-        *outP = ps[i];
-        *outD = ds[0];
-        return true;
+        for (cl_device_id d : ds) {
+            char dn[256] = {0};
+            clGetDeviceInfo(d, CL_DEVICE_NAME, sizeof(dn), dn, nullptr);
+            if (!strstr(dn, "Adreno")) continue;  /* never the Basic Render Driver */
+            cands.push_back({ps[i], d, deviceHasIL(d),
+                             strstr(nm, "QUALCOMM") != nullptr, nm});
+            break;
+        }
     }
-    return false;
+    if (cands.empty()) return false;
+
+    /* Native platforms first within each capability class. */
+    std::stable_sort(cands.begin(), cands.end(),
+                     [](const Cand &a, const Cand &b) { return a.native > b.native; });
+
+    const char *pref = getenv("DRAGONRT_PREFER");
+    bool wantNative = pref && strcmp(pref, "native") == 0;
+    const Cand *chosen = nullptr;
+    if (!wantNative) {
+        for (const Cand &c : cands)
+            if (c.il) { chosen = &c; break; }
+    }
+    if (!chosen) chosen = &cands.front();
+
+    *outP = chosen->p;
+    *outD = chosen->d;
+    *outIL = chosen->il;
+    if (outPlatName) *outPlatName = chosen->name;
+    return true;
 }
 
 extern "C" {
@@ -227,18 +302,30 @@ __declspec(dllexport) const char *AsyncRT_DeviceContext_create(
 
     cl_platform_id p = nullptr;
     cl_device_id d = nullptr;
-    if (!pickQualcomm(&p, &d))
-        return errf("no QUALCOMM OpenCL platform found");
+    bool hasIL = false;
+    std::string platName;
+    if (!pickAdreno(&p, &d, &hasIL, &platName))
+        return errf("no Adreno OpenCL platform found");
 
     cl_int err = CL_SUCCESS;
-    cl_context cl = clCreateContext(nullptr, 1, &d, nullptr, nullptr, &err);
+    /* With two platforms installed, clCreateContext(NULL props) is ambiguous
+     * (OpenCLOn12 returns null). Always name the platform. */
+    const intptr_t kClContextPlatform = 0x1084;
+    intptr_t props[3] = {kClContextPlatform, (intptr_t)p, 0};
+    cl_context cl =
+        clCreateContext((void *)props, 1, &d, nullptr, nullptr, &err);
     if (err != CL_SUCCESS) return errf("clCreateContext failed: %d", err);
 
     auto *c = new DragonContext();
     c->cl = cl;
     c->dev = d;
+    c->plat = p;
+    c->platName = platName;
     c->id = id;
     c->api = "adreno";
+    if (hasIL)
+        c->ilCreate = (pfn_createProgramWithILKHR)
+            clGetExtensionFunctionAddressForPlatform(p, "clCreateProgramWithILKHR");
 
     char nm[256] = {0};
     clGetDeviceInfo(d, CL_DEVICE_NAME, sizeof(nm), nm, nullptr);
@@ -313,7 +400,8 @@ __declspec(dllexport) int32_t *AsyncRT_DeviceContext_numberOfDevices(const char 
     if (loadCL()) {
         cl_platform_id p;
         cl_device_id d;
-        if (pickQualcomm(&p, &d)) n = 1;
+        bool il;
+        if (pickAdreno(&p, &d, &il, nullptr)) n = 1;
     }
     return &n;
 }
@@ -557,11 +645,16 @@ __declspec(dllexport) const char *AsyncRT_DeviceContext_loadFunction(
 
     bool isSpirv = dataLen >= 4 && memcmp(data, &kSpirvMagic, 4) == 0;
     if (isSpirv) {
-        if (!clCreateProgramWithIL)
-            return errf("SPIR-V module supplied but clCreateProgramWithIL is "
-                        "unavailable in this OpenCL runtime");
-        prog = clCreateProgramWithIL(c->cl, data, dataLen, &err);
-        if (err != CL_SUCCESS) return errf("clCreateProgramWithIL failed: %d", err);
+        if (!c->ilCreate)
+            return errf(
+                "SPIR-V module supplied but the selected OpenCL platform "
+                "('%s') cannot ingest IL. On this machine the native QUALCOMM "
+                "driver has no SPIR-V path; the OpenCLOn12 platform does "
+                "(unset DRAGONRT_PREFER=native to allow it).",
+                c->platName.c_str());
+        prog = c->ilCreate(c->cl, data, dataLen, &err);
+        if (err != CL_SUCCESS)
+            return errf("clCreateProgramWithILKHR failed: %d", err);
     } else {
         const char *src = data;
         size_t len = dataLen;

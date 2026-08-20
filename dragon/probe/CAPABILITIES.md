@@ -15,6 +15,8 @@ and the second is the one that matters.
 | **Full model graph** on `QnnGpu` | ✅ | ❌ | `CL_INVALID_OPERATION` in the recording queue |
 | **Our own synthetic model** on CPU + HTP | ✅ | ✅ | 4 MiB matmul chain; HTP matches CPU to 0.062% |
 | **128 MiB model** on HTP | ✅ | ✅ | 555 ms on the QAIRT 2.45 runtime |
+| **SPIR-V ingestion, native QUALCOMM CL** | — | ❌ | empty `CL_DEVICE_IL_VERSION`, no `cl_khr_il_program` — measured, `probe_adreno_spirv.py` |
+| **SPIR-V execution via OpenCLOn12** | ✅ | ✅ | hand-encoded kernel-flavor module ran on the Adreno, returned 42 |
 
 ## Reproducing
 
